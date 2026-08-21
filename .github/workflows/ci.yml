@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+    working-directory: ${{ github.workspace }}
+
+jobs:
+  static-and-bpf:
+    name: Static checks + eBPF smoke build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang \
+            libbpf-dev \
+            linux-libc-dev \
+            shellcheck \
+            cmake \
+            libjson-c-dev \
+            pkg-config \
+            gcc \
+            make
+
+      - name: Shellcheck init script
+        if: ${{ hashFiles('obserwrt/files/etc/init.d/obserwrt') != '' }}
+        run: |
+          set -euo pipefail
+          shellcheck obserwrt/files/etc/init.d/obserwrt
+
+      - name: Syntax-check ucode agent
+        # Builds ucode from source and compiles the agent to bytecode (no exec),
+        # validating syntax without needing its imports/modules at runtime.
+        if: ${{ hashFiles('obserwrt/files/usr/libexec/obserwrt/obserwrt.uc') != '' }}
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"
+          git clone --depth 1 https://github.com/jow-/ucode "$work/ucode"
+          cmake -S "$work/ucode" -B "$work/ucode/build" -DBUILD_UCODE_MODULES=OFF
+          cmake --build "$work/ucode/build" --target ucode -j"$(nproc)"
+          "$work/ucode/build/ucode" -c obserwrt/files/usr/libexec/obserwrt/obserwrt.uc
+
+      - name: Compile eBPF object (bpfel + bpfeb)
+        # Clang cross-compiles the BPF C source for both target byte orders,
+        # validating the parser, map defs and struct layout even before any
+        # OpenWrt build. Object is discarded; we only check it compiles.
+        if: ${{ hashFiles('obserwrt/src/obserwrt-bpf.c') != '' }}
+        run: |
+          set -euo pipefail
+          out="$(mktemp -d)"
+          clang -O2 -g -target bpfel -Iobserwrt/src/include \
+            -c obserwrt/src/obserwrt-bpf.c -o "$out/obserwrt-bpfel.o"
+          clang -O2 -g -target bpfeb -Iobserwrt/src/include \
+            -c obserwrt/src/obserwrt-bpf.c -o "$out/obserwrt-bpfeb.o"
+
+  feed-health:
+    name: Feed registration check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate feed layout
+        run: |
+          set -euo pipefail
+          # Every immediate subdirectory that looks like an OpenWrt package must
+          # contain a Makefile, otherwise `scripts/feeds update`/`install` skips
+          # it silently. `.github`, `docs` and other non-package dirs are exempt.
+          for dir in */; do
+            dir="${dir%/}"
+            case "$dir" in
+              .github|docs) continue ;;
+            esac
+            if [ -d "$dir" ] && [ ! -f "$dir/Makefile" ]; then
+              echo "::error::$dir/ exists but has no Makefile"
+              exit 1
+            fi
+          done
+          echo "feed layout OK"
