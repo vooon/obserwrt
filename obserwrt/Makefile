@@ -7,8 +7,8 @@ PKG_RELEASE:=1
 PKG_BUILD_DIR:=$(BUILD_DIR)/obserwrt-$(PKG_VERSION)
 PKG_BUILD_DEPENDS:=bpf-headers
 
-PKG_LICENSE:=ISC
-PKG_MAINTAINER:=vooon <vovan@users.noreply.github.com>
+PKG_LICENSE:=Apache-2.0
+PKG_MAINTAINER:=Vladimir Ermakov <vooon341@gmail.com>
 
 include $(INCLUDE_DIR)/package.mk
 include $(INCLUDE_DIR)/bpf.mk

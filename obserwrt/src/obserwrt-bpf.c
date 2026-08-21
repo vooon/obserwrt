@@ -118,4 +118,4 @@ int obserwrt_egress(struct __sk_buff *skb)
 	return observe(skb, 1);
 }
 
-char LICENSE[] SEC("license") = "ISC";
+char LICENSE[] SEC("license") = "Apache-2.0";
