@@ -32,8 +32,9 @@ architectural changes. Do not let the implementation drift from it.
   family; u8 protocol; u8 reserved; u8 src[16]; u8 dst[16]; u16 sport; u16 dport`.
   struct format: `"<LBBBx16s16sHH"` (little-endian; use `>` prefix on big-endian
   targets). The reserved byte keeps `src`/`dst` 4-byte aligned.
-- **Flow value (36 B):** `u64 packets; u64 bytes; u64 first_seen; u64 last_seen;
-  u8 tcp_flags`. struct format `"<QQQQB"`.
+- **Flow value (40 B):** `u64 packets; u64 bytes; u64 first_seen; u64 last_seen;
+  u8 tcp_flags` (naturally aligned: counters must be 8-byte aligned for atomic
+  increments). struct format `"<QQQQB7x"`.
 - **Address normalization:** IPv4 stored as IPv4-mapped IPv6 `::ffff:a.b.c.d`
   in the 16-byte fields. `family` is retained in the key for alignment/debug.
 - **Interface identity:** real kernel ifIndex, read at attach time via

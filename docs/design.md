@@ -147,9 +147,13 @@ Big-endian targets use the `>` prefix. The leading reserved byte keeps `src` and
 (the IP protocol number and address family are both ≤ 255), avoiding wasted 32-bit
 fields while keeping a clean, aligned struct.
 
-### 5.2 Flow value (36 bytes, native endian)
+### 5.2 Flow value (40 bytes, native endian)
 
-`"<QQQQB"`:
+The value keeps the `u64` counters **naturally aligned** (the 8-byte fields must
+be 8-byte aligned so atomic increments are valid in BPF), so the packed/`struct`
+size is 40 bytes (8×4 counters + 1 flag byte + 7 trailing pad).
+
+`struct`/`pack` format (little-endian targets): `"<QQQQB7x"`.
 
 | field      | struct | width |
 |------------|--------|-------|

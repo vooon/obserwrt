@@ -1,0 +1,6 @@
+config obserwrt 'main'
+	# Observe these Linux netdevs (exact names or glob patterns).
+	# Empty by default: obserwrt attaches to nothing until configured.
+	#
+	# list device 'awg_*'
+	# list device 'tun_*'
