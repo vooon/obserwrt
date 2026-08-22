@@ -118,6 +118,10 @@ network:
 transport:
     source_port
     destination_port
+
+icmp:
+    icmp_type          # for ICMP/ICMPv6, else 0
+    icmp_code          # for ICMP/ICMPv6, else 0
 ```
 
 The same 5-tuple observed on two interfaces, or on ingress and egress, is two
@@ -125,35 +129,39 @@ different observations.
 
 ## 5. eBPF layout
 
-### 5.1 Flow key (44 bytes, packed, native endian)
+### 5.1 Flow key (46 bytes, packed, native endian)
 
-| field    | offset | struct | width |
-|----------|--------|--------|-------|
-| ifindex  | 0      | `u32`  | 4     |
-| direction| 4      | `u8`   | 1     |
-| family   | 5      | `u8`   | 1     |
-| protocol | 6      | `u8`   | 1     |
-| reserved | 7      | `u8`   | 1     |
-| src      | 8      | `u8[16]` | 16  |
-| dst      | 24     | `u8[16]` | 16  |
-| sport    | 40     | `u16`  | 2     |
-| dport    | 42     | `u16`  | 2     |
+| field     | offset | struct    | width |
+|-----------|--------|-----------|-------|
+| ifindex   | 0      | `u32`     | 4     |
+| direction | 4      | `u8`      | 1     |
+| family    | 5      | `u8`      | 1     |
+| protocol  | 6      | `u8`      | 1     |
+| reserved  | 7      | `u8`      | 1     |
+| src       | 8      | `u8[16]`  | 16    |
+| dst       | 24     | `u8[16]`  | 16    |
+| sport     | 40     | `u16`     | 2     |
+| dport     | 42     | `u16`     | 2     |
+| icmp_type | 44     | `u8`      | 1     |
+| icmp_code | 45     | `u8`      | 1     |
 
-`struct`/`pack` format (little-endian targets): `"<LBBBx16s16sHH"`.
+`struct`/`pack` format (little-endian targets): `"<LBBBx16s16sHHBB"`.
 Big-endian targets use the `>` prefix. The leading reserved byte keeps `src` and
 `dst` 4-byte aligned within the packed struct.
 
 `direction` is 0 for ingress, 1 for egress. `family` and `protocol` are 8-bit
 (the IP protocol number and address family are both ≤ 255), avoiding wasted 32-bit
-fields while keeping a clean, aligned struct.
+fields while keeping a clean, aligned struct. `icmp_type`/`icmp_code` distinguish
+ICMP flows (e.g. echo request vs reply) and are 0 for TCP/UDP; `sport`/`dport`
+are 0 for ICMP.
 
 ### 5.2 Flow value (40 bytes, native endian)
 
 The value keeps the `u64` counters **naturally aligned** (the 8-byte fields must
 be 8-byte aligned so atomic increments are valid in BPF), so the packed/`struct`
-size is 40 bytes (8×4 counters + 1 flag byte + 7 trailing pad).
+size is 40 bytes (8×4 counters + a 16-bit `tcp_flags` + 6 trailing pad).
 
-`struct`/`pack` format (little-endian targets): `"<QQQQB7x"`.
+`struct`/`pack` format (little-endian targets): `"<QQQQH6x"`.
 
 | field      | struct | width |
 |------------|--------|-------|
@@ -161,7 +169,10 @@ size is 40 bytes (8×4 counters + 1 flag byte + 7 trailing pad).
 | bytes      | `u64`  | 8     |
 | first_seen | `u64`  | 8     |
 | last_seen  | `u64`  | 8     |
-| tcp_flags  | `u8`   | 1     |
+| tcp_flags  | `u16`  | 2     |
+
+`tcp_flags` is a 16-bit `tcpControlBits` (the standard low-8 TCP flags are
+accumulated with OR across the flow's packets, never summed).
 
 ### 5.3 Address normalization
 

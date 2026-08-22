@@ -24,8 +24,8 @@ const PRIO   = 10;      /* tc filter priority */
 const SNAP_S = 5;       /* counter snapshot interval (seconds) */
 
 /* flow key/value layouts (docs/design.md §5) */
-const KFMT = '<LBBBx16s16sHH';   /* 44 B */
-const VFMT = '<QQQQB7x';         /* 40 B */
+const KFMT = '<LBBBx16s16sHHBB';   /* 46 B */
+const VFMT = '<QQQQH6x';           /* 40 B */
 
 /* device patterns; assigned below once load_devices_once() is defined
  * (ucode does not hoist function declarations) */
@@ -210,8 +210,8 @@ function dump_counters()
 		let name = name_by_index[k[0]] || sprintf('%d', k[0]);
 		let dir = (k[1] == 0) ? 'ingress' : 'egress';
 
-		INFO('flow ifindex=%d ifname=%s direction=%s family=%d proto=%d packets=%d bytes=%d',
-		     k[0], name, dir, k[2], k[3], v[0], v[1]);
+		INFO('flow ifindex=%d ifname=%s direction=%s family=%d proto=%d sport=%d dport=%d icmp=%d/%d tcp_flags=0x%x packets=%d bytes=%d',
+		     k[0], name, dir, k[2], k[3], k[6], k[7], k[8], k[9], v[4], v[0], v[1]);
 		n++;
 	});
 	if (n == 0)
