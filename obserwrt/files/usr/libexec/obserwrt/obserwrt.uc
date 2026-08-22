@@ -22,6 +22,7 @@ ulog_open(ULOG_SYSLOG, LOG_DAEMON, "obserwrt");
 const BPF_OBJ = getenv('BPF_OBJ') || '/usr/lib/obserwrt/obserwrt-bpf.o';
 const PRIO   = 10;      /* tc filter priority */
 const SNAP_S = 5;       /* counter snapshot interval (seconds) */
+const RECONCIL_S = 30;  /* slow safety device reconcile interval (seconds) */
 
 /* flow key/value layouts (docs/design.md §5) */
 const KFMT = '<LBBBx16s16sHHBB';   /* 46 B */
@@ -239,15 +240,24 @@ function main()
 	}
 
 	let last = time();
+	let last_reconcil = time();
 	for (;;) {
 		sleep(1);
 		let now = time();
-		try {
-			snapshot();              /* continuous reconciliation */
+
+		/* Slow safety reconcile only (design §6.4): netifd `status` for every
+		 * device is expensive - polling it per-second hammers netifd. Devices
+		 * are attached/detached responsively via network.device events instead. */
+		if (now - last_reconcil >= RECONCIL_S) {
+			try {
+				snapshot();
+			}
+			catch (e) {
+				WARN('snapshot: %s', sprintf('%s', e));
+			}
+			last_reconcil = now;
 		}
-		catch (e) {
-			WARN('snapshot: %s', sprintf('%s', e));
-		}
+
 		if (now - last >= SNAP_S) {
 			try {
 				dump_counters();
