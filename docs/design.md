@@ -367,7 +367,8 @@ obserwrt/
     └── src/obserwrt-bpf.c
 ```
 
-- Dependencies: `ucode`, `ucode-mod-bpf`, `ucode-mod-ubus`, `ucode-mod-struct`
+- Dependencies: `ucode`, `ucode-mod-bpf`, `ucode-mod-ubus`, `ucode-mod-struct`,
+  `ucode-mod-log`
   (+ runtime eBPF support as needed). The eBPF object is built on-device-from-
   source via `include/bpf.mk` (BPF toolchain), not checked in as a binary.
 - procd service: starts at boot, respawns on failure, does not fail when

@@ -1,5 +1,6 @@
 #!/bin/sh /etc/rc.common
 
+# shellcheck disable=SC2034          # consumed by /etc/rc.common
 USE_PROCD=1
 
 START=98
@@ -9,7 +10,7 @@ start_service()
 {
 	procd_open_instance
 	procd_set_param command /usr/bin/ucode \
-		-lstruct -lubus -lbpf -luci \
+		-lstruct -lubus -lbpf -luci -llog -lfs \
 		/usr/libexec/obserwrt/obserwrt.uc
 	procd_set_param env BPF_OBJ=/usr/lib/obserwrt/obserwrt-bpf.o
 	procd_set_param respawn 3600 5 5

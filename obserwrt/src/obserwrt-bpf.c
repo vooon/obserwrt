@@ -13,8 +13,6 @@
  */
 #include "bpf_helpers.h"
 
-#define ETH_HLEN 14
-
 /* --- flow key / value (match docs/design.md §5) ---------------------- */
 
 struct flow_key {
@@ -41,41 +39,61 @@ struct flow_val {
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(max_entries, 4096);
-	__uint(map_flags, BPF_F_NO_PREALLOC);
 	__type(key, struct flow_key);
 	__type(value, struct flow_val);
 } obs_flows SEC(".maps");
 
 /* --- packet helpers --------------------------------------------------- */
 
-static inline __u16
-rd_be16(const void *p)
-{
-	const __u8 *b = p;
-
-	return (__u16)((__u16)b[0] << 8 | b[1]);
-}
-
+/*
+ * Observe a packet seen at `direction` on the device the TC filter is attached
+ * to.
+ *
+ * Framing: L3 devices (WireGuard/AmneziaWG tun, ARPHRD_NONE) hand the skb to TC
+ * with `data` pointing at the IP header (no link layer). Ethernet devices have
+ * a 14-byte link-layer header in front. We detect which by checking the IP
+ * version nibble at the start of the data vs at data+14.
+ */
 static int
 observe(struct __sk_buff *skb, __u8 direction)
 {
 	__u8 *data = (__u8 *)(__u64)skb->data;
 	__u8 *data_end = (__u8 *)(__u64)skb->data_end;
 	__u8  family = 0, proto = 0;
-	__u16 ethertype;
 
-	if (data + ETH_HLEN + 10 > data_end)
+	/* Enough to peek both `data` and `data + 14` framings. */
+	if (data + 16 > data_end)
 		return TC_ACT_OK;
 
-	ethertype = rd_be16(data + 12);
-
-	if (ethertype == 0x0800) {        /* IPv4 */
+	if ((data[0] >> 4) == 4) {
+		/* L3 device, IPv4 */
 		family = 4;
-		proto = data[ETH_HLEN + 9];
-	} else if (ethertype == 0x86DD) { /* IPv6 */
+		if (data + 10 > data_end)
+			return TC_ACT_OK;
+		proto = data[9];
+	}
+	else if ((data[0] >> 4) == 6) {
+		/* L3 device, IPv6 */
 		family = 6;
-		proto = data[ETH_HLEN + 6];
-	} else {
+		if (data + 7 > data_end)
+			return TC_ACT_OK;
+		proto = data[6];
+	}
+	else if ((data[14] >> 4) == 4) {
+		/* Ethernet, IPv4 */
+		family = 4;
+		if (data + 24 > data_end)
+			return TC_ACT_OK;
+		proto = data[23];
+	}
+	else if ((data[14] >> 4) == 6) {
+		/* Ethernet, IPv6 */
+		family = 6;
+		if (data + 21 > data_end)
+			return TC_ACT_OK;
+		proto = data[20];
+	}
+	else {
 		return TC_ACT_OK;
 	}
 

@@ -68,8 +68,9 @@ are non-package).
 
 ## Dependencies
 
-`ucode`, `ucode-mod-bpf`, `ucode-mod-ubus`, `ucode-mod-struct`. eBPF object is
-built from source via `include/bpf.mk` (BPF toolchain), never checked in.
+`ucode`, `ucode-mod-bpf`, `ucode-mod-ubus`, `ucode-mod-struct`, `ucode-mod-log`.
+eBPF object is built from source via `include/bpf.mk` (BPF toolchain), never
+checked in.
 
 ## Commands
 
@@ -95,6 +96,45 @@ Run the ucode agent directly with a config-files path during development:
 ```sh
 ucode -lstruct -lubus -lbpf -e 'import("obserwrt/files/usr/libexec/obserwrt/obserwrt.uc")'
 ```
+
+## ucode (the agent language) is NOT JavaScript
+
+ucode is ECMAScript-inspired but is a distinct language with a smaller
+standard library. Do not assume JS features. Write code against the official
+docs, which are authoritative:
+
+- **Language/tutorials:** https://ucode.mein.io (Usage, Syntax, Memory,
+  Arrays, Dictionaries tutorials)
+- **Core module:** https://ucode.mein.io/module-core.html
+- **Log:** https://ucode.mein.io/module-log.html
+- **Struct:** https://ucode.mein.io/module-struct.html
+- **UCI:** https://ucode.mein.io/module-uci.html
+- **Ubus:** https://ucode.mein.io/module-ubus.html
+- **Uloop:** https://ucode.mein.io/module-uloop.html
+
+Known non-JS gotchas that have already bitten this project:
+
+- **No function hoisting.** A function declared later in the file is undefined
+  when called earlier. Declare before use, or assign at the bottom near `main()`.
+- **No `arr.push()` / `arr.map()` etc. as methods.** Arrays use *global*
+  functions: `push(arr, …)`, `filter(arr, fn)`, `map(arr, fn)`, `pop(arr)`.
+- **No string `[]` indexing.** `s[i]` raises `left-hand side expression is not an
+  array or object`. Use `substr(s, i, 1)` or `ord(s, i)` to read a character.
+- **`for (x in arr)` yields elements, not indices** (on objects it yields keys).
+  For array indices iterate `i = 0..length(arr)-1`.
+- **No `throw` statement** (there is `try`/`catch`; use `die()` to raise).
+- **No `RegExp` / `new RegExp`.** Use `regexp(source, flags)` plus `match(str, re)`,
+  or hand-rolled matching for simple globs.
+- **No `{const x} = y` / `for (const i in …)`** — no `const` in loop heads; use
+  `let`.
+- **No implicit adjacent-string concatenation** (`'a' 'b'` is invalid) — use `+`.
+- **Object iteration**: `for (let k in obj)` gives keys; `keys(obj)` also works.
+  `for..in` over an object value that is actually null/other throws — guard first.
+- Undefined identifiers raise runtime "left-hand side is not a function"-style
+  errors, and `import` resolution needs the `ucode-mod-*` `.so` present (so a
+  CLI `ucode -c` syntax check requires stubbing imports — see CI).
+
+When in doubt, check the docs rather than assuming ECMAScript semantics.
 
 ## Conventions
 

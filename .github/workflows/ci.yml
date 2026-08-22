@@ -42,8 +42,11 @@ jobs:
           shellcheck obserwrt/files/etc/init.d/obserwrt
 
       - name: Syntax-check ucode agent
-        # Builds ucode from source and compiles the agent to bytecode (no exec),
-        # validating syntax without needing its imports/modules at runtime.
+        # Builds ucode from source and compiles the agent to bytecode (no exec).
+        # Import resolution needs the OpenWrt ucode-mod-* .so (e.g. bpf.so isn't
+        # part of the upstream ucode tree), so the imports are stubbed out for
+        # the parse check; API correctness is validated on-device. This catches
+        # syntax/typo errors cheaply.
         if: ${{ hashFiles('obserwrt/files/usr/libexec/obserwrt/obserwrt.uc') != '' }}
         run: |
           set -euo pipefail
@@ -51,7 +54,21 @@ jobs:
           git clone --depth 1 https://github.com/jow-/ucode "$work/ucode"
           cmake -S "$work/ucode" -B "$work/ucode/build" -DBUILD_UCODE_MODULES=OFF
           cmake --build "$work/ucode/build" --target ucode -j"$(nproc)"
-          "$work/ucode/build/ucode" -c obserwrt/files/usr/libexec/obserwrt/obserwrt.uc
+          python3 - <<'PY'
+          import re
+          src = open('obserwrt/files/usr/libexec/obserwrt/obserwrt.uc').read()
+          # drop all `import ... from '...';` lines (needs OpenWrt module .so)
+          src = re.sub(r'^import .*$', '', src, flags=re.M)
+          # provide minimal stubs for the symbols the agent relies on
+          src = ("function open_module(){} function tc_detach(){} function bpf_error(){}"
+                 "function connect(){} function cursor(){}"
+                 "function ulog_open(){} function ulog(){} function INFO(){}"
+                 "function NOTE(){} function WARN(){} function ERR(){}"
+                 "const struct={ unpack:function(){return [];}, pack:function(){return '';} };\n"
+                 + src)
+          open('/tmp/obserwrt-syntax.uc', 'w').write(src)
+          PY
+          "$work/ucode/build/ucode" -c /tmp/obserwrt-syntax.uc
 
       - name: Compile eBPF object (bpfel + bpfeb)
         # Clang cross-compiles the BPF C source for both target byte orders,
