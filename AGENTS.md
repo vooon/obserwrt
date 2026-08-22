@@ -124,7 +124,8 @@ Known non-JS gotchas that have already bitten this project:
   For array indices iterate `i = 0..length(arr)-1`.
 - **No `throw` statement** (there is `try`/`catch`; use `die()` to raise).
 - **No `RegExp` / `new RegExp`.** Use `regexp(source, flags)` plus `match(str, re)`,
-  or hand-rolled matching for simple globs.
+  or the built-in `wildcard(subject, pattern[, nocase])` (fnmatch-based glob) for
+  simple glob/pattern matching.
 - **No `{const x} = y` / `for (const i in …)`** — no `const` in loop heads; use
   `let`.
 - **No implicit adjacent-string concatenation** (`'a' 'b'` is invalid) — use `+`.

@@ -56,33 +56,12 @@ function load_devices_once()
 
 device_pats = load_devices_once();
 
-/* glob matcher via ucode regexp(): '*' and '?' supported, other regex
- * metacharacters are escaped so patterns are literal. */
-function glob_ok(name, pat)
-{
-	let re = '^';
-
-	for (let i = 0; i < length(pat); i++) {
-		let c = substr(pat, i, 1);   /* ucode strings: no [] indexing */
-
-		if (c === '*')
-			re += '.*';
-		else if (c === '?')
-			re += '.';
-		else if (index('.+*?^$()[]{}|\\', c) >= 0)
-			re += '\\' + c;
-		else
-			re += c;
-	}
-	re += '$';
-
-	return match(name, regexp(re)) !== null;
-}
-
+/* matches a netdev name against the configured patterns using ucode's
+ * built-in fnmatch-based wildcard() */
 function glob_match(name)
 {
 	for (let i = 0; i < length(device_pats); i++) {
-		if (glob_ok(name, device_pats[i]))
+		if (wildcard(name, device_pats[i]))
 			return true;
 	}
 	return false;
