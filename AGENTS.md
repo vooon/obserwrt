@@ -112,7 +112,7 @@ after any change to `.uc`, `init.d`, or `.c`.
 Run the ucode agent directly with a config-files path during development:
 
 ```sh
-ucode -lstruct -lubus -lbpf -e 'import("obserwrt/files/usr/share/ucode/obserwrt/obserwrt.uc")'
+ucode -e 'import("obserwrt/files/usr/share/ucode/obserwrt/obserwrt.uc")'
 ```
 
 ## ucode (the agent language) is NOT JavaScript
