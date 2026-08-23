@@ -185,6 +185,20 @@ When in doubt, check the docs rather than assuming ECMAScript semantics.
 - Add dependencies beyond those actually needed; keep the package lean.
 - Begin an IPFIX feature before the P0 TC-visibility probe is proven.
 
+## Testing (see also `.github/workflows/ci.yml`)
+
+- **goflow2 e2e** (`scripts/emit-test.uc` + `scripts/test-ipfix.sh`): emits a
+  fixed IPv4 TCP + IPv6 UDP flow via `exporter_ipfix.uc` and asserts an
+  independent collector (goflow2 via `GOFLOW2`/`docker`) decodes the expected
+  fields. Needs ucode with the struct/socket/uci/log modules to run the emitter.
+  `exporter_ipfix.connect(host, port, source_addr)` is exported so the exporter
+  can be driven directly.
+- **Unit tests (planned, fw4-style):** follow firewall4's pattern — a
+  `tests/lib/mocklib.uc` that stubs modules (`socket`/`uci`, keeps real
+  `struct`), declarative `tests/NN_…/NN_…` cases with `-- Expect stdout/stderr/
+  exitcode --` sections, and `run_tests.sh` that runs `ucode -S -l mocklib`
+  and diffs. `ucode -c`/`node scripts/uc-lint.mjs` are the CI static checks.
+
 ## Milestones (see design §13)
 
 P0 TC visibility → P1 flow tracking → P2 dynamic devices → P3 debug export →
