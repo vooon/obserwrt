@@ -14,10 +14,6 @@ import * as struct from 'struct';
 
 const BPF_OBJ_LOC = getenv('BPF_OBJ') || '/lib/bpf/obserwrt-bpf.o';
 
-/* flow key/value layouts (docs/design.md §5) - private, use the parse helpers */
-const KFMT = '<LBBBx16s16sHHBB';   /* 46 B */
-const VFMT = '<QQQQH6x';           /* 40 B */
-
 /* Direction at the observation point (mirrors the BPF enum). */
 export const DIR = { INGRESS: 0, EGRESS: 1 };
 
@@ -86,9 +82,10 @@ export function purge_device(ifindex) {
 
 /* --- wire-format parsing (the single struct owner) ------------------- */
 
-/* Precompiled formats (parsed once, reused for every lookup). */
-const KEY_FMT = struct.new(KFMT);
-const VAL_FMT = struct.new(VFMT);
+/* Precompiled formats (flow key = 46 B '<LBBBx16s16sHHBB', value = 40 B
+ * '<QQQQH6x'; struct/type owner - see docs/design.md §5). */
+const KEY_FMT = struct.new('<LBBBx16s16sHHBB');
+const VAL_FMT = struct.new('<QQQQH6x');
 
 /* Decode a raw flow-map key (bytes) into a key object. */
 export function parse_key(raw)
