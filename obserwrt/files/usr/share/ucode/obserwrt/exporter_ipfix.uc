@@ -183,6 +183,27 @@ export function emit(k, v, expired)
 	}
 };
 
+/* Open the UDP socket to a collector and start exporting from this call-hour
+ * offset. `host:port` is the collector address; `source_addr` optionally pins
+ * the local source IP. Returns true on success. Reusable (e.g. by tests). */
+export function connect(host, port, source_addr)
+{
+	offset_ms = time() * 1000 - mono_ms();
+	dest = host + ':' + port;
+	sock = socket.create(socket.AF_INET, socket.SOCK_DGRAM, 0);
+
+	if (!sock) {
+		WARN('ipfix: socket create failed');
+		return false;
+	}
+
+	if (source_addr && !sock.bind(source_addr + ':0'))
+		WARN('ipfix: bind source %s failed (%s)', source_addr, socket.error());
+
+	send_templates();
+	return true;
+};
+
 /* Initialise the exporter from the exporter_ipfix UCI section. */
 export function init()
 {
@@ -211,19 +232,5 @@ export function init()
 		return false;
 	}
 
-	offset_ms = time() * 1000 - mono_ms();
-	dest = host + ':' + port;
-	sock = socket.create(socket.AF_INET, socket.SOCK_DGRAM, 0);
-
-	if (!sock) {
-		WARN('ipfix: socket create failed');
-		return false;
-	}
-
-	/* Optionally send from a specific local address (source_address). */
-	if (source_addr && !sock.bind(source_addr + ':0'))
-		WARN('ipfix: bind source %s failed (%s)', source_addr, socket.error());
-
-	send_templates();
-	return true;
+	return connect(host, port, source_addr);
 };
