@@ -12,7 +12,7 @@ import { cursor } from 'uci';
 import { ulog, WARN, LOG_INFO } from 'log';
 import { INGRESS } from './flow.uc';
 import { ifname } from './reconcile.uc';
-import { bool_option, sys_hostname, iso_timestamp, resolve_dest } from './util.uc';
+import { bool_option, parse_port, sys_hostname, iso_timestamp, resolve_dest } from './util.uc';
 
 let local = false;
 let format = 'json';
@@ -82,15 +82,12 @@ function send(message)
 
 export function connect(host, port, source_addr)
 {
-	let port_str = (type(port) == 'int') ? sprintf('%d', port) : port;
 	let addr = resolve_dest(host);
 
-	if (addr === null) {
-		WARN('syslog: cannot resolve %s', host);
-		return false;
-	}
+	if (addr === null)
+		die(sprintf('syslog: cannot resolve %s', host));
 
-	dest = addr + ':' + port_str;
+	dest = `${addr}:${port}`;
 	sock = socket.create(socket.AF_INET, socket.SOCK_DGRAM, 0);
 
 	if (!sock) {
@@ -107,6 +104,7 @@ export function connect(host, port, source_addr)
 export function init()
 {
 	let ctx = cursor();
+
 	let enabled = ctx.get('obserwrt', 'syslog', 'enabled');
 	if (!bool_option(enabled, false))
 		return false;
@@ -133,7 +131,7 @@ export function init()
 		return true;
 	}
 
-	let port = int(ctx.get('obserwrt', 'syslog', 'syslog_port') || '514');
+	let port = parse_port(ctx.get('obserwrt', 'syslog', 'syslog_port'), 514);
 	let source_addr = ctx.get('obserwrt', 'syslog', 'source_address');
 
 	if (!connect(host, port, source_addr))

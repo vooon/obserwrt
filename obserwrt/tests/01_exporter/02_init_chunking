@@ -55,8 +55,11 @@ for (let i = 1; i < after_flush; i++) {
 	let hdr = struct.unpack('!HHIII', d);
 	let setId = struct.unpack('!HH', substr(d, 16, 4))[0];
 
-	printf("  [%d] version=%d seq=%d first_set=%d len=%d\n",
-		i, hdr[0], hdr[3], setId, length(d));
+	printf("  [%d] version=%d seq=%d first_set=%d len=%d hlen=%d\n",
+		i, hdr[0], hdr[3], setId, length(d), hdr[1]);
+
+	if (hdr[1] != length(d))
+		die(sprintf('header length %d != datagram %d', hdr[1], length(d)));
 }
 -- End --
 
@@ -64,7 +67,7 @@ for (let i = 1; i < after_flush; i++) {
 datagrams after init=1
   #0 host=192.0.2.10 port=4739 len=128
 total datagrams=4
-  [1] version=10 seq=0 first_set=257 len=1126
-  [2] version=10 seq=14 first_set=257 len=1126
-  [3] version=10 seq=28 first_set=257 len=178
+  [1] version=10 seq=0 first_set=257 len=1126 hlen=1126
+  [2] version=10 seq=14 first_set=257 len=1126 hlen=1126
+  [3] version=10 seq=28 first_set=257 len=178 hlen=178
 -- End --

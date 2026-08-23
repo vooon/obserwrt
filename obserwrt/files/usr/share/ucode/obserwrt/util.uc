@@ -25,6 +25,27 @@ export function bool_option(value, fallback)
 	}
 };
 
+/* Parse a TCP/UDP port option into an int. A missing/empty value uses `def`;
+ * a present but invalid value is a fatal configuration error. */
+export function parse_port(value, def)
+{
+	let v;
+
+	if (type(value) == 'int')
+		v = value;
+	else if (type(value) == 'string' && match(value, /^[0-9]+$/))
+		v = int(value);
+	else if (value === '' || value === null)
+		return def;
+	else
+		die(sprintf('invalid port: %s', value));
+
+	if (v < 0 || v > 65535)
+		die(sprintf('invalid port: %d', v));
+
+	return v;
+};
+
 /* Router hostname. Returns '' if it cannot be read. */
 export function sys_hostname()
 {

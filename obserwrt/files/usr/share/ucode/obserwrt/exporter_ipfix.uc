@@ -21,7 +21,7 @@ import * as struct from 'struct';
 import { cursor } from 'uci';
 import { WARN, INFO } from 'log';
 import { INGRESS, EGRESS } from './flow.uc';
-import { bool_option, resolve_dest } from './util.uc';
+import { bool_option, parse_port, resolve_dest } from './util.uc';
 
 const VERSION   = 10;
 const SET_TEMPLATE = 2;
@@ -100,10 +100,11 @@ function template_set(tid, fields)
 	return struct.pack('!HH', SET_TEMPLATE, 4 + length(rec)) + rec;
 }
 
-/* Send one set as one datagram (single data set per datagram). */
+/* Send one set as one datagram (single data set per datagram). The message
+ * Length counts header(16) + set header(4) + records. */
 function emit_set(set_id, body, cnt)
 {
-	sock.send(msg_header(16 + length(body)) + struct.pack('!HH', set_id, 4 + length(body)) + body, 0, dest);
+	sock.send(msg_header(16 + 4 + length(body)) + struct.pack('!HH', set_id, 4 + length(body)) + body, 0, dest);
 	seq += cnt;
 }
 
@@ -190,13 +191,11 @@ export function connect(host, port, source_addr)
 {
 	let addr = resolve_dest(host);
 
-	if (addr === null) {
-		WARN('ipfix: cannot resolve %s', host);
-		return false;
-	}
+	if (addr === null)
+		die(sprintf('ipfix: cannot resolve %s', host));
 
 	offset_ms = time() * 1000 - mono_ms();
-	dest = addr + ':' + port;
+	dest = `${addr}:${port}`;
 	sock = socket.create(socket.AF_INET, socket.SOCK_DGRAM, 0);
 
 	if (!sock) {
@@ -214,25 +213,15 @@ export function connect(host, port, source_addr)
 /* Initialise the exporter from the exporter_ipfix UCI section. */
 export function init()
 {
-	let host = null, port = '4739', source_addr = null;
+	let ctx = cursor();
 
-	try {
-		const ctx = cursor();
-		let enabled = ctx.get('obserwrt', 'ipfix', 'enabled');
-
-		if (!bool_option(enabled, false))
-			return false;
-
-		host = ctx.get('obserwrt', 'ipfix', 'collector_host');
-		source_addr = ctx.get('obserwrt', 'ipfix', 'source_address');
-
-		let p = ctx.get('obserwrt', 'ipfix', 'collector_port');
-		if (p)
-			port = p;
-	}
-	catch (e) {
+	let enabled = ctx.get('obserwrt', 'ipfix', 'enabled');
+	if (!bool_option(enabled, false))
 		return false;
-	}
+
+	let host = ctx.get('obserwrt', 'ipfix', 'collector_host');
+	let source_addr = ctx.get('obserwrt', 'ipfix', 'source_address');
+	let port = parse_port(ctx.get('obserwrt', 'ipfix', 'collector_port'), 4739);
 
 	if (!host) {
 		WARN('ipfix: no collector_host configured');
