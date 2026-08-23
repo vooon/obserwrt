@@ -93,6 +93,21 @@ for (const file of readdirSync(dir).filter((f) => f.endsWith('.uc'))) {
 				err(file, `'${id}' is a string and not []-indexable (line ${ln + 1}): "${line.trim()}"`);
 		}
 	});
+
+	// 2d) forward-declared exports (`export function name;`) must have a matching
+	//     definition, and a plain `function name;` must not shadow an export.
+	const defnOf = (name) => {
+		// `export function name(` definition (must not match the `;` forward decl)
+		return new RegExp(`export\\s+function\\s+${name}\\s*\\(`).test(src);
+	};
+	for (const m of src.matchAll(/^export\s+function\s+([A-Za-z_$][\w$]*)\s*;\s*$/gm)) {
+		if (!defnOf(m[1]))
+			err(file, `forward-declared export '${m[1]}' has no matching definition`);
+	}
+	for (const m of src.matchAll(/^function\s+([A-Za-z_$][\w$]*)\s*;\s*$/gm)) {
+		if (new RegExp(`export\\s+function\\s+${m[1]}\\s*\\(`).test(src))
+			err(file, `plain forward-declaration 'function ${m[1]};' would shadow the exported '${m[1]}'`);
+	}
 }
 }
 
