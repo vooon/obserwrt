@@ -24,9 +24,10 @@ syslog.emit({
 	packets: 2, bytes: 128, first_seen: 10, last_seen: 20, tcp_flags: 2,
 }, true);
 
-let record = json(substr(global.MOCK_LOG[0], 6));
+let record = json(substr(global.MOCK_LOG[0], index(global.MOCK_LOG[0], ': ') + 2));
 printf("level=%s ifname=%s src=%s dst=%s expired=%d packets=%d\n",
-	substr(global.MOCK_LOG[0], 0, 5), record.ifname, record.src, record.dst,
+	substr(global.MOCK_LOG[0], 0, index(global.MOCK_LOG[0], ': ')),
+	record.ifname, record.src, record.dst,
 	record.expired ? 1 : 0, record.packets);
 -- End --
 

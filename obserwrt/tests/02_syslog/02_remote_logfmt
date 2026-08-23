@@ -31,7 +31,7 @@ let msg = global.MOCK_SENT[0].data;
 printf("host=%s port=%d pri1=%d app=%d probe=%d ts=%d has_ifname=%d has_src=%d has_expired=%d\n",
 	global.MOCK_SENT[0].host, global.MOCK_SENT[0].port,
 	index(msg, '<134>1 ') == 0, index(msg, ' obserwrt ') != -1,
-	index(msg, 'probe-awg0') != -1, match(msg, /Z obserwrt /) !== null,
+	index(msg, 'probe-awg0') != -1, match(msg, /Z probe-awg0 obserwrt /) !== null,
 	index(msg, 'ifname="30"') != -1,
 	index(msg, 'src="2001:db8::1"') != -1,
 	index(msg, 'expired=0') != -1);

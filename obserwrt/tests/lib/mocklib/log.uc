@@ -19,7 +19,8 @@ function ERR(...args)   { record('ERR', ...args); }
 function NOTE(...args)  { return null; }
 
 function ulog_open() { return null; }
-function ulog(...args) { record('ULOG', ...args); }
+function ulog(priority, format, ...args) { record('ULOG', format, ...args); }
+function ulog_threshold() { return null; }
 
 export const ULOG_SYSLOG = 0;
 export const LOG_DAEMON  = 0;

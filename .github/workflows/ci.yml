@@ -47,40 +47,45 @@ jobs:
         run: |
           node scripts/uc-lint.mjs
 
-      - name: Syntax-check ucode agent
-        # Builds ucode from source and compiles each agent module to bytecode
-        # (no exec). Import resolution needs the OpenWrt ucode-mod-* .so (e.g.
-        # bpf.so isn't part of the upstream ucode tree), so the imports are
-        # stubbed out for the parse check; API correctness is validated
-        # on-device. This catches syntax/typo errors cheaply.
+      - name: Build ucode (with struct/socket/fs/log modules)
+        # Upstream ucode's modules provide the real `struct` (the mocklib mocks
+        # override socket/fs/log for the tests), needed for both `-c` and the
+        # unit suite. Only needs json-c, already installed above.
+        if: ${{ hashFiles('obserwrt/files/usr/share/ucode/obserwrt/*.uc') != '' }}
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/jow-/ucode /tmp/ucode-src
+          cmake -S /tmp/ucode-src -B /tmp/ucode-src/build -DBUILD_UCODE_MODULES=ON
+          cmake --build /tmp/ucode-src/build -j"$(nproc)"
+
+      - name: Syntax-check ucode agent (ucode -c)
+        # Compile each module to bytecode without executing it. ucode resolves
+        # imports at compile time, but the OpenWrt modules (bpf/uci/ubus/uloop)
+        # are not in the upstream tree, so strip the import/export lines and
+        # prepend a stub header providing the referenced names.
         if: ${{ hashFiles('obserwrt/files/usr/share/ucode/obserwrt/*.uc') != '' }}
         run: |
           set -euo pipefail
           work="$(mktemp -d)"
-          git clone --depth 1 https://github.com/jow-/ucode "$work/ucode"
-          cmake -S "$work/ucode" -B "$work/ucode/build" -DBUILD_UCODE_MODULES=OFF
-          cmake --build "$work/ucode/build" --target ucode -j"$(nproc)"
-          python3 - <<'PY'
-          import re, glob, os
-          hdr = ("function open_module(){} function tc_detach(){} function bpf_error(){}"
-                 "function connect(){} function cursor(){} function readfile(){}"
-                 "function ulog_open(){} function ulog(){} function INFO(){}"
-                 "function NOTE(){} function WARN(){} function ERR(){}"
-                 "const struct={ unpack:function(){return [];}, pack:function(){return '';} };\n")
-          os.makedirs('/tmp/obserwrt-syntax', exist_ok=True)
-          files = glob.glob('obserwrt/files/usr/share/ucode/obserwrt/*.uc')
-          assert files, 'no obserwrt ucode modules found'
-          for f in files:
-              src = open(f).read()
-              src = re.sub(r'^import .*$', '', src, flags=re.M)
-              src = re.sub(r'^export ', '', src, flags=re.M)  # modules -> programs
-              out = '/tmp/obserwrt-syntax/' + os.path.basename(f)
-              open(out, 'w').write(hdr + src)
-              print('stubbed', f, '->', out)
-          PY
-          for f in /tmp/obserwrt-syntax/*.uc; do
-            "$work/ucode/build/ucode" -c "$f"
+          for f in obserwrt/files/usr/share/ucode/obserwrt/*.uc; do
+            { cat obserwrt/tests/syntax-stub.uc
+              sed -e '/^import /d' -e 's/^export //' "$f"; } \
+              > "$work/$(basename "$f")"
           done
+          for f in "$work"/*.uc; do
+            /tmp/ucode-src/build/ucode -c "$f"
+          done
+
+      - name: Run ucode unit tests (mocked modules)
+        # The fw4-style suite mocks socket/uci/log/bpf and takes the real
+        # struct + fs from UCODE_MODULES, so it runs on the host ucode with no
+        # OpenWrt target. Covers wire encoding, chunking, and the syslog sender.
+        if: ${{ hashFiles('obserwrt/tests/run_tests.sh') != '' }}
+        run: |
+          set -euo pipefail
+          UCODE_BIN=/tmp/ucode-src/build/ucode \
+          UCODE_MODULES=/tmp/ucode-src/build \
+            obserwrt/tests/run_tests.sh
 
       - name: Compile eBPF object (bpfel + bpfeb)
         # Clang cross-compiles the BPF C source for both target byte orders,
