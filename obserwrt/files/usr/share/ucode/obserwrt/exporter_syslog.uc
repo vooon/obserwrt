@@ -11,32 +11,12 @@ import * as socket from 'socket';
 import { cursor } from 'uci';
 import { ulog, WARN, LOG_INFO } from 'log';
 import { INGRESS } from './flow.uc';
+import { bool_option } from './util.uc';
 
 let active = false;
 let local = false;
 let format = 'json';
 let sock = null;
-
-/* Match OpenWrt's get_bool() accepted spellings. */
-function bool_option(value, fallback)
-{
-	switch (value) {
-	case '1':
-	case 'on':
-	case 'true':
-	case 'yes':
-	case 'enabled':
-		return true;
-	case '0':
-	case 'off':
-	case 'false':
-	case 'no':
-	case 'disabled':
-		return false;
-	default:
-		return fallback;
-	}
-};
 
 function key_ip(value, family)
 {

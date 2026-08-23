@@ -51,6 +51,7 @@ define Package/obserwrt/install
 	$(INSTALL_DATA) \
 		./files/usr/share/ucode/obserwrt/obserwrt.uc \
 		./files/usr/share/ucode/obserwrt/flow.uc \
+		./files/usr/share/ucode/obserwrt/util.uc \
 		./files/usr/share/ucode/obserwrt/reconcile.uc \
 		./files/usr/share/ucode/obserwrt/lifecycle.uc \
 		./files/usr/share/ucode/obserwrt/exporter_ipfix.uc \
