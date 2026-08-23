@@ -15,7 +15,8 @@ import * as struct from 'struct';
 const BPF_OBJ_LOC = getenv('BPF_OBJ') || '/lib/bpf/obserwrt-bpf.o';
 
 /* Direction at the observation point (mirrors the BPF enum). */
-export const DIR = { INGRESS: 0, EGRESS: 1 };
+export const INGRESS = 0;
+export const EGRESS  = 1;
 
 let handle = null;   /* loaded module refs { flows, ingress, egress } */
 
@@ -52,7 +53,7 @@ export function flows() {
 
 /* tc hook name for a direction */
 function dir_str(d) {
-	return (d == DIR.INGRESS) ? 'ingress' : 'egress';
+	return (d == INGRESS) ? 'ingress' : 'egress';
 };
 
 /* Attach the TC program at `direction` to a netdev. Returns null on success or
@@ -60,7 +61,7 @@ function dir_str(d) {
  * importing modules never need to touch the `bpf` module directly. */
 export function attach(name, direction, prio)
 {
-	let prog = (direction == DIR.INGRESS) ? handle.ingress : handle.egress;
+	let prog = (direction == INGRESS) ? handle.ingress : handle.egress;
 	let ok = prog.tc_attach(name, dir_str(direction), prio, 0);
 
 	return ok ? null : bpf_error();

@@ -11,7 +11,7 @@
 import { cursor } from 'uci';
 import { readfile } from 'fs';
 import { INFO, NOTE, WARN } from 'log';
-import { attach, detach, purge_device, DIR } from './flow.uc';
+import { attach, detach, purge_device, INGRESS, EGRESS } from './flow.uc';
 
 const PRIO = 10;      /* tc filter priority */
 
@@ -75,9 +75,9 @@ function attach_device(name, ifindex)
 
 	let e;
 
-	if ((e = attach(name, DIR.INGRESS, PRIO)))
+	if ((e = attach(name, INGRESS, PRIO)))
 		WARN('ingress attach %s: %s', name, e);
-	if ((e = attach(name, DIR.EGRESS, PRIO)))
+	if ((e = attach(name, EGRESS, PRIO)))
 		WARN('egress attach %s: %s', name, e);
 
 	attached[name] = { ifindex: ifindex || ifindex_of(name) };
@@ -89,8 +89,8 @@ function detach_device(name, ifindex)
 	if (!attached[name])
 		return;
 
-	detach(name, DIR.INGRESS, PRIO);
-	detach(name, DIR.EGRESS, PRIO);
+	detach(name, INGRESS, PRIO);
+	detach(name, EGRESS, PRIO);
 	purge_device(ifindex);
 
 	delete attached[name];
@@ -161,7 +161,7 @@ export function rname(ifindex)
  * inactive flow that lifecycle.uc is about to remove. */
 export function export_flow(k, v, expired)
 {
-	let dir = (k.direction == DIR.INGRESS) ? 'ingress' : 'egress';
+	let dir = (k.direction == INGRESS) ? 'ingress' : 'egress';
 
 	INFO('flow ifindex=%d ifname=%s direction=%s family=%d proto=%d sport=%d dport=%d icmp=%d/%d tcp_flags=0x%x packets=%d bytes=%d%s',
 	     k.ifindex, rname(k.ifindex), dir, k.family, k.protocol,
