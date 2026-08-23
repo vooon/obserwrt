@@ -12,7 +12,7 @@ start_service()
 	procd_set_param command /usr/bin/ucode \
 		-lstruct -lubus -lbpf -luci -llog -lfs \
 		/usr/share/ucode/obserwrt/obserwrt.uc
-	procd_set_param env BPF_OBJ=/usr/lib/obserwrt/obserwrt-bpf.o
+	procd_set_param env BPF_OBJ=/lib/bpf/obserwrt-bpf.o
 	procd_set_param respawn 3600 5 5
 	procd_set_param file /etc/config/obserwrt
 	procd_set_param stdio /dev/null 1 1

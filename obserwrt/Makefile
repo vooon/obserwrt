@@ -43,11 +43,11 @@ endef
 
 define Package/obserwrt/install
 	$(INSTALL_DIR) \
-		$(1)/usr/lib/obserwrt \
+		$(1)/lib/bpf \
 		$(1)/usr/share/ucode/obserwrt \
 		$(1)/etc/config \
 		$(1)/etc/init.d
-	$(INSTALL_DATA) $(PKG_BUILD_DIR)/obserwrt-bpf.o $(1)/usr/lib/obserwrt/
+	$(INSTALL_DATA) $(PKG_BUILD_DIR)/obserwrt-bpf.o $(1)/lib/bpf/
 	$(INSTALL_DATA) \
 		./files/usr/share/ucode/obserwrt/obserwrt.uc \
 		./files/usr/share/ucode/obserwrt/flow.uc \

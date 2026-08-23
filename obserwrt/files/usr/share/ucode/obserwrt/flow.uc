@@ -9,7 +9,7 @@
 import { open_module, error as bpf_error, BPF_PROG_TYPE_SCHED_CLS } from 'bpf';
 import * as struct from 'struct';
 
-const BPF_OBJ_LOC = getenv('BPF_OBJ') || '/usr/lib/obserwrt/obserwrt-bpf.o';
+const BPF_OBJ_LOC = getenv('BPF_OBJ') || '/lib/bpf/obserwrt-bpf.o';
 
 /* flow key/value layouts (docs/design.md §5) */
 export const KFMT = '<LBBBx16s16sHHBB';   /* 46 B */
