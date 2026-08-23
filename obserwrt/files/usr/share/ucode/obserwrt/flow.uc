@@ -42,7 +42,7 @@ export function load_bpf() {
 		die(sprintf('open_module(%s) failed: %s', BPF_OBJ_LOC, bpf_error()));
 
 	bpf = {
-		flows: mod.get_map('obs_flows'),
+		flows: mod.get_map('obserwrt_flows'),
 		ing:   mod.get_program('obserwrt_ingress'),
 		eg:    mod.get_program('obserwrt_egress'),
 	};

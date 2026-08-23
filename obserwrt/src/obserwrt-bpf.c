@@ -58,7 +58,7 @@ struct {
 	__uint(max_entries, 4096);
 	__type(key, struct flow_key);
 	__type(value, struct flow_val);
-} obs_flows SEC(".maps");
+} obserwrt_flows SEC(".maps");
 
 /* --- packet helpers --------------------------------------------------- */
 
@@ -73,7 +73,7 @@ ip4_to_in6(__u8 out[16], const __u8 *ip)
 
 /*
  * Observe a packet seen at `direction` on the device the TC filter is attached
- * to. Aggregates into obs_flows and returns TC_ACT_OK (pass).
+ * to. Aggregates into obserwrt_flows and returns TC_ACT_OK (pass).
  */
 static int
 observe(struct __sk_buff *skb, __u8 direction)
@@ -163,7 +163,7 @@ observe(struct __sk_buff *skb, __u8 direction)
 	key.icmp_type = icmp_type;
 	key.icmp_code = icmp_code;
 
-	struct flow_val *val = bpf_map_lookup_elem(&obs_flows, &key);
+	struct flow_val *val = bpf_map_lookup_elem(&obserwrt_flows, &key);
 
 	if (val) {
 		__sync_fetch_and_add(&val->packets, 1);
@@ -179,7 +179,7 @@ observe(struct __sk_buff *skb, __u8 direction)
 		nv.first_seen = now;
 		nv.last_seen = now;
 		nv.tcp_flags = tcpf;
-		bpf_map_update_elem(&obs_flows, &key, &nv, BPF_ANY);
+		bpf_map_update_elem(&obserwrt_flows, &key, &nv, BPF_ANY);
 	}
 
 	return TC_ACT_OK;
