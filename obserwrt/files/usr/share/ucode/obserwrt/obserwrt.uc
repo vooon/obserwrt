@@ -12,8 +12,9 @@ import { connect } from 'ubus';
 import { init as uloop_init, run as uloop_run, interval } from 'uloop';
 import { ulog_open, ulog, WARN, ERR, ULOG_SYSLOG, LOG_DAEMON, LOG_DEBUG } from 'log';
 import { load_bpf } from './flow.uc';
-import { snapshot, on_device_event } from './reconcile.uc';
+import { snapshot, on_device_event, attached_count } from './reconcile.uc';
 import { run as lifecycle_pass } from './lifecycle.uc';
+import { init as metrics_init, observe as metrics_observe, record_error as metrics_error, set_gauges as metrics_gauges, write as metrics_write, interval as metrics_interval } from './metrics.uc';
 import { init as ipfix_init, emit as ipfix_emit, flush as ipfix_flush } from './exporter_ipfix.uc';
 import { init as syslog_init, emit as syslog_emit } from './exporter_syslog.uc';
 
@@ -25,9 +26,12 @@ let syslog_active = false;
 
 ulog_open(ULOG_SYSLOG, LOG_DAEMON, "obserwrt");
 
-/* Dispatches one normalized observation to all configured exporters. */
+/* Dispatches one normalized observation to all configured exporters and folds
+ * it into the Prometheus aggregates. */
 function emit_flow(k, v, expired)
 {
+	metrics_observe(k, v, expired);
+
 	if (syslog_active)
 		syslog_emit(k, v, expired);
 
@@ -45,6 +49,21 @@ function main()
 	syslog_active = syslog_init();
 	if (!ipfix_active && !syslog_active)
 		WARN('no exporters enabled; observations will not be exported');
+
+	if (metrics_init()) {
+		/* Self-observability runs on its own cadence, independent of the 5s
+		 * lifecycle flush. */
+		metrics_write();
+		interval(metrics_interval() * 1000, function () {
+			try {
+				metrics_write();
+			}
+			catch (e) {
+				metrics_error();
+				WARN('metrics: %s', e);
+			}
+		});
+	}
 
 	let ubus = connect();
 	if (!ubus)
@@ -79,8 +98,10 @@ function main()
 				ulog(LOG_DEBUG, 'snapshot: no counters observed yet');
 			if (ipfix_active)
 				ipfix_flush();
+			metrics_gauges(n.active, n.map, attached_count());
 		}
 		catch (e) {
+			metrics_error();
 			WARN('lifecycle: %s', e);
 		}
 	});

@@ -129,6 +129,12 @@ export function ifname(ifindex)
 	return name_by_index[ifindex] || sprintf('%d', ifindex);
 };
 
+/* Number of currently attached netdevs (for self-observability metrics). */
+export function attached_count()
+{
+	return length(attached);
+};
+
 /* netifd network.device notification handler. Runs outside the entry's
  * try/catch, so it must never throw. */
 export function on_device_event(ev)

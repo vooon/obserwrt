@@ -54,6 +54,7 @@ define Package/obserwrt/install
 		./files/usr/share/ucode/obserwrt/util.uc \
 		./files/usr/share/ucode/obserwrt/reconcile.uc \
 		./files/usr/share/ucode/obserwrt/lifecycle.uc \
+		./files/usr/share/ucode/obserwrt/metrics.uc \
 		./files/usr/share/ucode/obserwrt/exporter_ipfix.uc \
 		./files/usr/share/ucode/obserwrt/exporter_syslog.uc \
 		$(1)/usr/share/ucode/obserwrt/

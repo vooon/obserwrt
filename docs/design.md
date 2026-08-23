@@ -340,18 +340,21 @@ Example JSON payload:
 
 ## 9. Self-observability
 
-Do not put individual flows into Prometheus labels. Future aggregate metrics may
-expose e.g. `obserwrt_packets_total`, `obserwrt_bytes_total`,
-`obserwrt_flows_active`, `obserwrt_flows_exported_total`,
-`obserwrt_export_errors_total`, `obserwrt_bpf_map_entries`,
-`obserwrt_devices_attached`.
+Individual flows are **never** placed into Prometheus labels; only aggregates are
+exposed: `obserwrt_packets_total`, `obserwrt_bytes_total`,
+`obserwrt_flows_exported_total`, `obserwrt_export_errors_total`
+(counters) and `obserwrt_flows_active`, `obserwrt_bpf_map_entries`,
+`obserwrt_devices_attached` (gauges).
 
-Metrics are published via the **Prometheus textfile collector**: obserwrt writes
-a `.prom` file (e.g. `/run/prometheus/textfile/obserwrt.prom`) that a node-exporter
-instance scrapes. obserwrt does **not** implement an HTTP
-server. Files are written atomically (temp file + rename) as an all-or-nothing
-snapshot on each flow/export cycle. Prometheus is not required for the initial
-flow-export milestone.
+Metrics are published via the **Prometheus textfile collector**: `metrics.uc`
+writes a `.prom` file atomically (temp file + rename, all-or-nothing) that a
+node-exporter instance scrapes. obserwrt does **not** implement an HTTP server.
+The feature is enabled by setting `main.prometheus_textfile` to a writable path
+(e.g. `/run/prometheus/textfile/obserwrt.prom`); `main.prometheus_interval`
+(default 20s) is the cadence of a dedicated uloop timer that rewrites the file,
+independent of the 5s lifecycle flush (counters accumulate on every pass).
+`packets`/`bytes` are cumulative totals built from per-flow deltas, so a
+long-lived flow is counted exactly once.
 
 ## 10. Configuration (UCI)
 
@@ -360,6 +363,8 @@ config obserwrt 'main'
     list device 'awg_*'
     option inactive_timeout '10'    # expire/delete idle flows after this (s)
     option active_timeout '60'      # active timeout: re-export long-lived flows
+    # option prometheus_textfile '/run/prometheus/textfile/obserwrt.prom'  # unset = disabled
+    option prometheus_interval '20'
 
 config exporter 'ipfix'
     option type 'ipfix'

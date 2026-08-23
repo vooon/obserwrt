@@ -5,6 +5,12 @@ config obserwrt 'main'
 	list device 'awg*'
 	option inactive_timeout '10'
 	option active_timeout '60'
+	# Enable Prometheus self-observability via the node-exporter textfile
+	# collector by pointing at a writable metrics file (atomic temp+rename).
+	# Unset/empty disables metrics. Metrics are rewritten at most every
+	# `prometheus_interval` seconds.
+	# option prometheus_textfile '/run/prometheus/textfile/obserwrt.prom'
+	option prometheus_interval '20'
 
 # IPFIX exporter (opt-in). Enable with 'option enabled' and point at a
 # collector. `collector_host` is an IP address (hostname resolution is a
