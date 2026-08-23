@@ -76,6 +76,9 @@ if [ -n "$store_pid" ]; then
 	kill "$store_pid" 2>/dev/null || true
 	wait "$store_pid" 2>/dev/null || true
 elif [ -n "$cleanup_docker" ]; then
+	# goflow2 runs in the container; pull its decoded output into $LOG before
+	# stopping it (the `-d`/native branches wrote $LOG at startup already).
+	docker logs "$cleanup_docker" >"$LOG" 2>&1 || true
 	docker stop "$cleanup_docker" >/dev/null 2>&1 || true
 fi
 
