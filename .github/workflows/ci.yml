@@ -80,13 +80,20 @@ jobs:
         # Clang cross-compiles the BPF C source for both target byte orders,
         # validating the parser, map defs and struct layout even before any
         # OpenWrt build. Object is discarded; we only check it compiles.
+        #
+        # The source uses the OpenWrt/bpf.mk include style (`<uapi/linux/bpf.h>`
+        # + `<bpf/bpf_helpers.h>`), so we shim `uapi/linux` -> `/usr/include/linux`
+        # and add the asm + libbpf paths from linux-libc-dev/libbpf-dev.
         if: ${{ hashFiles('obserwrt/src/obserwrt-bpf.c') != '' }}
         run: |
           set -euo pipefail
           out="$(mktemp -d)"
-          clang -O2 -g -target bpfel -Iobserwrt/src/include \
+          mkdir -p "$out/uapi"
+          ln -s /usr/include/linux "$out/uapi/linux"
+          inc="-I$out -I/usr/include/x86_64-linux-gnu -I/usr/include"
+          clang -O2 -g -target bpfel $inc \
             -c obserwrt/src/obserwrt-bpf.c -o "$out/obserwrt-bpfel.o"
-          clang -O2 -g -target bpfeb -Iobserwrt/src/include \
+          clang -O2 -g -target bpfeb $inc \
             -c obserwrt/src/obserwrt-bpf.c -o "$out/obserwrt-bpfeb.o"
 
   feed-health:

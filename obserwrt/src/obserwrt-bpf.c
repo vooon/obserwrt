@@ -16,7 +16,11 @@
  * The map uses the final flow-key/value layouts (see docs/design.md §5); IPv4
  * addresses are stored as IPv4-mapped IPv6 ::ffff:a.b.c.d in the 16-byte fields.
  */
-#include "bpf_helpers.h"
+#include <uapi/linux/bpf.h>
+#include <uapi/linux/types.h>
+#include <uapi/linux/pkt_cls.h>
+#include <bpf/bpf_helpers.h>
+#include <bpf/bpf_endian.h>
 
 /* Direction at the observation point. */
 enum direction {
@@ -159,23 +163,23 @@ observe(struct __sk_buff *skb, __u8 direction)
 	key.icmp_type = icmp_type;
 	key.icmp_code = icmp_code;
 
-	struct flow_val *val = obserw_bpf_map_lookup_elem(&obs_flows, &key);
+	struct flow_val *val = bpf_map_lookup_elem(&obs_flows, &key);
 
 	if (val) {
 		__sync_fetch_and_add(&val->packets, 1);
 		__sync_fetch_and_add(&val->bytes, skb->len);
 		val->tcp_flags |= tcpf;   /* union of observed flags */
-		val->last_seen = obserw_bpf_ktime_get_ns();
+		val->last_seen = bpf_ktime_get_ns();
 	} else {
 		struct flow_val nv = { 0 };
-		__u64 now = obserw_bpf_ktime_get_ns();
+		__u64 now = bpf_ktime_get_ns();
 
 		nv.packets = 1;
 		nv.bytes = skb->len;
 		nv.first_seen = now;
 		nv.last_seen = now;
 		nv.tcp_flags = tcpf;
-		obserw_bpf_map_update_elem(&obs_flows, &key, &nv, BPF_ANY);
+		bpf_map_update_elem(&obs_flows, &key, &nv, BPF_ANY);
 	}
 
 	return TC_ACT_OK;

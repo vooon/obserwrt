@@ -95,9 +95,12 @@ shellcheck obserwrt/files/etc/init.d/obserwrt
 # ucode bytecode/compile check (no exec; `-c`; requires stubbing imports)
 # for f in obserwrt/files/usr/share/ucode/obserwrt/*.uc; do ...; done
 
-# eBPF compile smoke, both byte orders
-clang -O2 -g -target bpfel -Iobserwrt/src/include -c obserwrt/src/obserwrt-bpf.c -o /tmp/bpfel.o
-clang -O2 -g -target bpfeb -Iobserwrt/src/include -c obserwrt/src/obserwrt-bpf.c -o /tmp/bpfeb.o
+# eBPF compile smoke, both byte orders (real headers, OpenWrt bpf.mk `uapi/` style)
+# Needs the system kernel UAPI + libbpf headers (linux-libc-dev, libbpf-dev):
+#   mkdir -p /tmp/uapi && ln -s /usr/include/linux /tmp/uapi/linux
+#   inc="-I/tmp/uapi -I/usr/include/x86_64-linux-gnu -I/usr/include"
+#   clang -O2 -g -target bpfel $inc -c src/obserwrt-bpf.c -o /tmp/bpfel.o
+#   clang -O2 -g -target bpfeb $inc -c src/obserwrt-bpf.c -o /tmp/bpfeb.o
 ```
 
 There is no test suite yet; CI runs the above and a feed-layout check. Run them
