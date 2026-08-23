@@ -2,13 +2,14 @@
  * obserwrt - syslog flow exporter
  *
  * Sends normalized observations as RFC 5424-compatible syslog messages. An
- * An empty syslog_host uses the process-local OpenWrt syslog facility; a remote
+ * empty syslog_host uses the process-local OpenWrt syslog facility; a remote
  * syslog_host uses one connected UDP socket for the lifetime of the agent.
  */
 "use strict";
 
 import * as socket from 'socket';
 import { cursor } from 'uci';
+import { readfile } from 'fs';
 import { ulog, WARN, LOG_INFO } from 'log';
 import { INGRESS } from './flow.uc';
 import { ifname } from './reconcile.uc';
@@ -18,6 +19,26 @@ let active = false;
 let local = false;
 let format = 'json';
 let sock = null;
+let self_host = '';
+
+/* Router hostname, so a collector can tell which probe emitted a message. */
+function sys_hostname()
+{
+	let name = readfile('/proc/sys/kernel/hostname');
+	if (name === null)
+		return '';
+
+	return rtrim(name);
+};
+
+/* RFC 5424 TIMESTAMP: ISO 8601, UTC. */
+function iso_timestamp()
+{
+	let t = gmtime(time());
+
+	return sprintf('%04d-%02d-%02dT%02d:%02d:%02dZ',
+		t.year, t.mon, t.mday, t.hour, t.min, t.sec);
+};
 
 function key_ip(value, family)
 {
@@ -59,10 +80,10 @@ function encode(record)
 	if (format == 'json')
 		return sprintf('%J', record);
 
-	return sprintf('ifindex=%d direction=%s family=%d protocol=%d icmp_type=%d icmp_code=%d src=%J dst=%J sport=%d dport=%d packets=%d bytes=%d first_seen_ns=%d last_seen_ns=%d tcp_flags=%d expired=%d',
-		record.ifindex, record.direction, record.family, record.protocol,
-		record.icmp_type, record.icmp_code, record.src, record.dst,
-		record.sport, record.dport, record.packets, record.bytes,
+	return sprintf('ifindex=%d ifname=%J direction=%s family=%d protocol=%d icmp_type=%d icmp_code=%d src=%J dst=%J sport=%d dport=%d packets=%d bytes=%d first_seen_ns=%d last_seen_ns=%d tcp_flags=%d expired=%d',
+		record.ifindex, record.ifname, record.direction, record.family,
+		record.protocol, record.icmp_type, record.icmp_code, record.src,
+		record.dst, record.sport, record.dport, record.packets, record.bytes,
 		record.first_seen_ns, record.last_seen_ns, record.tcp_flags,
 		record.expired ? 1 : 0);
 };
@@ -76,7 +97,8 @@ function send(message)
 	}
 
 	if (sock)
-		sock.send('<134>1 - obserwrt - - - ' + message);
+		sock.send('<134>1 ' + iso_timestamp() + ' ' + self_host +
+			' obserwrt - - - ' + message);
 };
 
 export function init()
@@ -98,6 +120,10 @@ export function init()
 		WARN('syslog: unsupported protocol %s', protocol);
 		return false;
 	}
+
+	self_host = ctx.get('obserwrt', 'syslog', 'hostname');
+	if (type(self_host) != 'string' || self_host == '')
+		self_host = sys_hostname();
 
 	let host = ctx.get('obserwrt', 'syslog', 'syslog_host') || '';
 	if (!host) {

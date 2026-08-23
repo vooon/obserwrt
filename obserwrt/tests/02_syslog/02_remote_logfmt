@@ -6,7 +6,8 @@
     "syslog_host": "192.0.2.10",
     "syslog_port": "5514",
     "protocol": "udp",
-    "format": "logfmt"
+    "format": "logfmt",
+    "hostname": "probe-awg0"
   }
 }
 -- End --
@@ -27,13 +28,15 @@ syslog.emit({
 }, false);
 
 let msg = global.MOCK_SENT[0].data;
-printf("host=%s port=%d header=%s has_ifname=%d has_src=%d has_expired=%d\n",
+printf("host=%s port=%d pri1=%d app=%d probe=%d ts=%d has_ifname=%d has_src=%d has_expired=%d\n",
 	global.MOCK_SENT[0].host, global.MOCK_SENT[0].port,
-	substr(msg, 0, 24), index(msg, 'ifname="30"') != -1,
+	index(msg, '<134>1 ') == 0, index(msg, ' obserwrt ') != -1,
+	index(msg, 'probe-awg0') != -1, match(msg, /Z obserwrt /) !== null,
+	index(msg, 'ifname="30"') != -1,
 	index(msg, 'src="2001:db8::1"') != -1,
 	index(msg, 'expired=0') != -1);
 -- End --
 
 -- Expect stdout --
-host=192.0.2.10 port=5514 header=<134>1 - obserwrt - - -  has_ifname=1 has_src=1 has_expired=1
+host=192.0.2.10 port=5514 pri1=1 app=1 probe=1 ts=1 has_ifname=1 has_src=1 has_expired=1
 -- End --

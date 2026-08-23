@@ -15,9 +15,12 @@ config exporter_ipfix 'ipfix'
 
 # Syslog exporter (opt-in). Empty syslog_host uses local syslog; a non-empty
 # syslog_host is resolved once and used as a remote UDP syslog endpoint.
+# `hostname` sets the RFC 5424 HOSTNAME used to identify this probe; empty
+# defaults to the router hostname.
 config exporter_syslog 'syslog'
 	option enabled '0'
 	option syslog_host ''
 	option syslog_port '514'
 	option protocol 'udp'
 	option format 'json'
+	# option hostname ''
