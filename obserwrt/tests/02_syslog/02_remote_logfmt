@@ -3,7 +3,7 @@
   "exporter_syslog": {
     ".name": "syslog",
     "enabled": "on",
-    "syslog_host": "192.0.2.10",
+    "syslog_host": "syslog.example.net",
     "syslog_port": "5514",
     "protocol": "udp",
     "format": "logfmt",

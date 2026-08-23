@@ -41,6 +41,10 @@ function connect(host, port, hints) {
 	};
 }
 
+function addrinfo(host, service, hints) {
+	return [ { addr: { address: '192.0.2.10' }, family: AF_INET, socktype: SOCK_DGRAM } ];
+}
+
 export const AF_INET = 2;
 export const SOCK_DGRAM = 2;
-export { error, create, connect };
+export { error, create, connect, addrinfo };

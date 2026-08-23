@@ -12,8 +12,7 @@
  * templates are retransmitted every TEMPLATE_INTERVAL_S. Sequence number counts
  * data records per observation domain.
  *
- * The collector destination is an IP[:port] for now; hostname resolution is a
- * follow-up (see docs/design.md §8.1).
+ * The collector destination is an IP or hostname (resolved via util.resolve_dest).
  */
 "use strict";
 
@@ -22,7 +21,7 @@ import * as struct from 'struct';
 import { cursor } from 'uci';
 import { WARN, INFO } from 'log';
 import { INGRESS, EGRESS } from './flow.uc';
-import { bool_option } from './util.uc';
+import { bool_option, resolve_dest } from './util.uc';
 
 const VERSION   = 10;
 const SET_TEMPLATE = 2;
@@ -189,8 +188,15 @@ export function emit(k, v, expired)
  * the local source IP. Returns true on success. Reusable (e.g. by tests). */
 export function connect(host, port, source_addr)
 {
+	let addr = resolve_dest(host);
+
+	if (addr === null) {
+		WARN('ipfix: cannot resolve %s', host);
+		return false;
+	}
+
 	offset_ms = time() * 1000 - mono_ms();
-	dest = host + ':' + port;
+	dest = addr + ':' + port;
 	sock = socket.create(socket.AF_INET, socket.SOCK_DGRAM, 0);
 
 	if (!sock) {

@@ -306,7 +306,8 @@ not classify routes, services, or address scope.
 
 - Empty `syslog_host` writes through the process-local OpenWrt syslog facility.
 - A non-empty `syslog_host` is resolved once and sent over a connected UDP
-  socket, default port **514**.
+  socket, default port **514**. An optional `source_address` pins the local
+  source IP, mirroring the IPFIX exporter bind/source-address option.
 - `protocol` is currently limited to `udp`; `tcp` is reserved for a future
   implementation.
 - Remote messages use RFC 5424-compatible framing with `obserwrt` as the
@@ -370,6 +371,7 @@ config exporter_syslog 'syslog'
     option protocol 'udp'
     option format 'json'        # json or logfmt
     # option hostname ''        # RFC 5424 HOSTNAME; empty = router hostname
+    # option source_address ''  # pin local source IP
 ```
 
 `device` entries are exact Linux netdev names or simple glob patterns. Both

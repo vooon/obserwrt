@@ -12,12 +12,12 @@ import { cursor } from 'uci';
 import { ulog, WARN, LOG_INFO } from 'log';
 import { INGRESS } from './flow.uc';
 import { ifname } from './reconcile.uc';
-import { bool_option, sys_hostname, iso_timestamp } from './util.uc';
+import { bool_option, sys_hostname, iso_timestamp, resolve_dest } from './util.uc';
 
-let active = false;
 let local = false;
 let format = 'json';
 let sock = null;
+let dest = '';
 let self_host = '';
 
 function key_ip(value, family)
@@ -78,13 +78,36 @@ function send(message)
 
 	if (sock)
 		sock.send('<134>1 ' + iso_timestamp() + ' ' + self_host +
-			' obserwrt - - - ' + message);
+			' obserwrt - - - ' + message, 0, dest);
+};
+
+export function connect(host, port, source_addr)
+{
+	let port_str = (type(port) == 'int') ? sprintf('%d', port) : port;
+	let addr = resolve_dest(host);
+
+	if (addr === null) {
+		WARN('syslog: cannot resolve %s', host);
+		return false;
+	}
+
+	dest = addr + ':' + port_str;
+	sock = socket.create(socket.AF_INET, socket.SOCK_DGRAM, 0);
+
+	if (!sock) {
+		WARN('syslog: socket create failed');
+		return false;
+	}
+
+	if (source_addr && !sock.bind(source_addr + ':0'))
+		WARN('syslog: bind source %s failed (%s)', source_addr, socket.error());
+
+	return true;
 };
 
 export function init()
 {
 	let ctx = cursor();
-
 	let enabled = ctx.get('obserwrt', 'syslog', 'enabled');
 	if (!bool_option(enabled, false))
 		return false;
@@ -108,30 +131,19 @@ export function init()
 	let host = ctx.get('obserwrt', 'syslog', 'syslog_host') || '';
 	if (!host) {
 		local = true;
-		active = true;
 		return true;
 	}
 
 	let port = int(ctx.get('obserwrt', 'syslog', 'syslog_port') || '514');
-	try {
-		sock = socket.connect(host, port, { socktype: socket.SOCK_DGRAM });
-	}
-	catch (e) {
-		WARN('syslog: cannot connect %s:%d: %s', host, port, e);
-		return false;
-	}
+	let source_addr = ctx.get('obserwrt', 'syslog', 'source_address');
 
-	if (!sock) {
-		WARN('syslog: cannot connect %s:%d: %s', host, port, socket.error());
+	if (!connect(host, port, source_addr))
 		return false;
-	}
 
-	active = true;
 	return true;
 };
 
 export function emit(k, v, expired)
 {
-	if (active)
-		send(encode(flow_record(k, v, expired)));
+	send(encode(flow_record(k, v, expired)));
 };
