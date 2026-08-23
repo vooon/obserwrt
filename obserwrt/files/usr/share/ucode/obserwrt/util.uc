@@ -25,9 +25,10 @@ export function bool_option(value, fallback)
 	}
 };
 
-/* Parse a TCP/UDP port option into an int. A missing/empty value uses `def`;
- * a present but invalid value is a fatal configuration error. */
-export function parse_port(value, def)
+/* Parse a non-negative integer option in [0, hi]. Missing/empty uses `def`; a
+ * present but invalid value is a fatal configuration error. `label` is used in
+ * error messages. */
+function parse_uint(value, def, hi, label)
 {
 	let v;
 
@@ -38,12 +39,24 @@ export function parse_port(value, def)
 	else if (value === '' || value === null)
 		return def;
 	else
-		die(sprintf('invalid port: %s', value));
+		die(sprintf('%s: invalid value: %s', label, value));
 
-	if (v < 0 || v > 65535)
-		die(sprintf('invalid port: %d', v));
+	if (v < 0 || v > hi)
+		die(sprintf('%s: out of range: %d', label, v));
 
 	return v;
+};
+
+/* Parse a TCP/UDP port option. */
+export function parse_port(value, def)
+{
+	return parse_uint(value, def, 65535, 'port');
+};
+
+/* Parse a 32-bit observation-domain / ID option. */
+export function parse_domain(value, def)
+{
+	return parse_uint(value, def, 4294967295, 'observation_domain');
 };
 
 /* Router hostname. Returns '' if it cannot be read. */

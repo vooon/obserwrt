@@ -358,11 +358,14 @@ flow-export milestone.
 ```uci
 config obserwrt 'main'
     list device 'awg_*'
+    option inactive_timeout '10'    # expire/delete idle flows after this (s)
+    option active_timeout '60'      # active timeout: re-export long-lived flows
 
 config exporter 'ipfix'
     option type 'ipfix'
     option destination 'collector.example.net'   # IP address or hostname
     option port '4739'
+    option observation_domain '1'   # per-router observation domain
 
 config exporter_syslog 'syslog'
     option enabled '0'
@@ -379,9 +382,12 @@ ingress and egress are attached to every selected device. There is **no
 implicit attach-to-everything default**. No per-interface sections until a real
 need for differing per-device behavior exists.
 
+The lifecycle timeouts (`inactive_timeout`, `active_timeout`) live in the `main`
+section, and the per-router IPFIX `observation_domain` in the exporter section,
+so each router can carve out its own domain for multi-collector deployments.
+
 Likely future options (only when actually needed):
-`active_timeout`, `inactive_timeout`, `source_address`, `template_interval`,
-`max_flows`, `rescan_interval`.
+`template_interval`, `max_flows`, `rescan_interval`.
 
 ## 11. Deployment (package)
 

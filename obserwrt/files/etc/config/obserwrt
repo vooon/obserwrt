@@ -3,14 +3,18 @@ config obserwrt 'main'
 	# Observe these Linux netdevs (exact names or glob patterns).
 	# Empty by default: obserwrt attaches to nothing until configured.
 	list device 'awg*'
+	option inactive_timeout '10'
+	option active_timeout '60'
 
 # IPFIX exporter (opt-in). Enable with 'option enabled' and point at a
 # collector. `collector_host` is an IP address (hostname resolution is a
-# follow-up); `source_address` optionally pins the source IP.
+# follow-up); `source_address` optionally pins the source IP; `observation_domain`
+# disambiguates the observation domain (per-router) in multi-collector setups.
 config exporter_ipfix 'ipfix'
 	option enabled '0'
 	option collector_host '192.0.2.10'
 	option collector_port '4739'
+	option observation_domain '1'
 	# option source_address ''
 
 # Syslog exporter (opt-in). Empty syslog_host uses local syslog; a non-empty

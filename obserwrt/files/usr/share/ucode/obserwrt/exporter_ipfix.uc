@@ -21,7 +21,7 @@ import * as struct from 'struct';
 import { cursor } from 'uci';
 import { WARN, INFO } from 'log';
 import { INGRESS, EGRESS } from './flow.uc';
-import { bool_option, parse_port, resolve_dest } from './util.uc';
+import { bool_option, parse_port, parse_domain, resolve_dest } from './util.uc';
 
 const VERSION   = 10;
 const SET_TEMPLATE = 2;
@@ -30,7 +30,7 @@ const IPV6_TID = 257;
 
 const MAX_UDP           = 1200;        /* avoid IP fragmentation on normal MTU */
 const TEMPLATE_INTERVAL_S = 60;
-const OBS_DOMAIN        = 1;           /* per-router; TODO make configurable */
+let obs_domain = 1;                    /* per-router; configured via UCI */
 
 /* Data record formats, big-endian:
  * addr(4|16),addr,sport,dport,proto,packets,bytes,flowStart,flowEnd,tcp,ingr,egr */
@@ -93,7 +93,7 @@ function mono_ms()
 
 function msg_header(msg_len)
 {
-	return MSG_HEADER.pack(VERSION, msg_len, time(), seq, OBS_DOMAIN);
+	return MSG_HEADER.pack(VERSION, msg_len, time(), seq, obs_domain);
 }
 
 function template_set(tid, fields)
@@ -143,7 +143,7 @@ function send_templates()
 
 	sock.send(msg_header(16 + length(body)) + body, 0, dest);
 	last_template_sent = time();
-	INFO('ipfix: templates sent (domain %d)', OBS_DOMAIN);
+	INFO('ipfix: templates sent (domain %d)', obs_domain);
 }
 
 /* Flush buffered data records (and templates when their retransmit interval
@@ -233,6 +233,8 @@ export function init()
 
 	let port = parse_port(ctx.get('obserwrt', 'ipfix', 'collector_port'), 4739);
 	let source_addr = ctx.get('obserwrt', 'ipfix', 'source_address');
+
+	obs_domain = parse_domain(ctx.get('obserwrt', 'ipfix', 'observation_domain'), 1);
 
 	return connect(host, port, source_addr);
 };

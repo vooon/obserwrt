@@ -14,12 +14,32 @@
 "use strict";
 
 import { flows, parse_key, parse_value } from './flow.uc';
+import { cursor } from 'uci';
 
-const INACTIVE_S = 10;   /* expire/delete a flow idle longer than this */
-const ACTIVE_S   = 60;   /* active timeout: long-lived flows are re-exported
-                          * every pass (no extra state needed for v1) */
+/* Flow expiry/active timeouts (seconds), configurable via the `main` UCI
+ * section (`inactive_timeout` / `active_timeout`). */
+let inactive_s = 10;
+let active_s   = 60;
 
-export const timeouts = { inactive: INACTIVE_S, active: ACTIVE_S };
+function load_timeouts()
+{
+	try {
+		const ctx = cursor();
+		let v = ctx.get('obserwrt', 'main', 'inactive_timeout');
+
+		if (v !== null && match(v, /^[0-9]+$/))
+			inactive_s = int(v);
+
+		let a = ctx.get('obserwrt', 'main', 'active_timeout');
+
+		if (a !== null && match(a, /^[0-9]+$/))
+			active_s = int(a);
+	}
+	catch (e) {
+		/* no/malformed config - keep defaults */
+	}
+}
+load_timeouts();
 
 /* monotonic "now" in nanoseconds - same clock as bpf_ktime_get_ns() */
 function now_ns()
@@ -31,7 +51,7 @@ function now_ns()
 
 /* One lifecycle pass. `exporter(k, v, expired)` receives the parsed flow key
  * and value objects. Returns { active, expired } counts. Flows idle longer than
- * INACTIVE_S are exported as expired and deleted from the map. */
+ * inactive_s are exported as expired and deleted from the map. */
 export function run(exporter)
 {
 	let now = now_ns();
@@ -42,7 +62,7 @@ export function run(exporter)
 		let v = parse_value(flows().get(key));
 		let age_s = (now - v.last_seen) / 1000000000.0;
 
-		if (age_s > INACTIVE_S) {
+		if (age_s > inactive_s) {
 			exporter(k, v, true);
 			flows().delete(key);
 			n.expired++;
