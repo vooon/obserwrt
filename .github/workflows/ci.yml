@@ -12,7 +12,6 @@ concurrency:
 defaults:
   run:
     shell: bash
-    working-directory: ${{ github.workspace }}
 
 jobs:
   static-and-bpf:
