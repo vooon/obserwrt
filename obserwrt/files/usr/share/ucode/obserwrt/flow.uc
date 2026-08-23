@@ -21,14 +21,14 @@ const VFMT = '<QQQQH6x';           /* 40 B */
 /* Direction at the observation point (mirrors the BPF enum). */
 export const DIR = { INGRESS: 0, EGRESS: 1 };
 
-let bpf = null;   /* loaded module refs */
+let handle = null;   /* loaded module refs { flows, ingress, egress } */
 
 /* --- map access ------------------------------------------------------ */
 
-/* Load and verify the eBPF module. Idempotent; returns the refs. */
+/* Load and verify the eBPF module. Idempotent; returns the handles. */
 export function load_bpf() {
-	if (bpf)
-		return bpf;
+	if (handle)
+		return handle;
 
 	/* libbpf 1.6 no longer infers SCHED_CLS from "classifier/<sub>". */
 	let mod = open_module(BPF_OBJ_LOC, {
@@ -41,16 +41,16 @@ export function load_bpf() {
 	if (!mod)
 		die(sprintf('open_module(%s) failed: %s', BPF_OBJ_LOC, bpf_error()));
 
-	bpf = {
-		flows: mod.get_map('obserwrt_flows'),
-		ing:   mod.get_program('obserwrt_ingress'),
-		eg:    mod.get_program('obserwrt_egress'),
+	handle = {
+		flows:   mod.get_map('obserwrt_flows'),
+		ingress: mod.get_program('obserwrt_ingress'),
+		egress:  mod.get_program('obserwrt_egress'),
 	};
 
-	return bpf;
+	return handle;
 };
 
-export function flows() { return bpf.flows; };
+export function flows() { return handle.flows; };
 /* tc hook name for a direction */
 const dir_str = function(d) { return (d == DIR.INGRESS) ? 'ingress' : 'egress'; };
 
@@ -59,7 +59,7 @@ const dir_str = function(d) { return (d == DIR.INGRESS) ? 'ingress' : 'egress'; 
  * importing modules never need to touch the `bpf` module directly. */
 export function attach(name, direction, prio)
 {
-	let prog = (direction == DIR.INGRESS) ? bpf.ing : bpf.eg;
+	let prog = (direction == DIR.INGRESS) ? handle.ingress : handle.egress;
 	let ok = prog.tc_attach(name, dir_str(direction), prio, 0);
 
 	return ok ? null : bpf_error();
