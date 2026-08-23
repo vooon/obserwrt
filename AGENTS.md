@@ -141,6 +141,9 @@ Known non-JS gotchas that have already bitten this project:
   node-exporter's `import { fetch_json } from '../http_client.uc'`).
 - **No function hoisting.** A function declared later in the file is undefined
   when called earlier. Declare before use, or assign at the bottom near `main()`.
+  ucode also supports a first-class forward declaration `function name;` (docs
+  §4.2) so a later-defined function can be referenced earlier; `scripts/uc-lint.mjs`
+  strips those lines before the node syntax check.
 - **No `arr.push()` / `arr.map()` etc. as methods.** Arrays use *global*
   functions: `push(arr, …)`, `filter(arr, fn)`, `map(arr, fn)`, `pop(arr)`.
 - **No string `[]` indexing.** `s[i]` raises `left-hand side expression is not an

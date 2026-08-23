@@ -35,8 +35,11 @@ for (const file of readdirSync(dir).filter((f) => f.endsWith('.uc'))) {
 	const src = readFileSync(path.join(dir, file), 'utf8');
 
 	// 1) ESM syntax via node's parser (cat f | node --input-type=module --check)
+	// ucode's `function name;` forward-declaration (see ucode docs §4.2) is not
+	// valid ECMAScript, so strip those lines before the node parse.
+	const syntaxSrc = src.replace(/^function\s+[A-Za-z_$][\w$]*\s*;\s*$/gm, '');
 	const r = spawnSync(process.execPath, ['--input-type=module', '--check'], {
-		input: src,
+		input: syntaxSrc,
 		encoding: 'utf8',
 	});
 	if (syntaxCheck && r.status !== 0)
