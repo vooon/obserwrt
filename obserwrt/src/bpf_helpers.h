@@ -19,6 +19,19 @@ typedef unsigned short __u16;
 typedef unsigned int   __u32;
 typedef unsigned long long __u64;
 
+/* Endian-aware byte-swap (network <-> host) using the compiler builtin, so it
+ * is a compile-time no-op on big-endian targets and a bswap on little-endian.
+ * (OpenWrt's bpf.mk compiles in kernel mode where <linux/bpf.h> is the kernel
+ * header, so we define these here instead.) */
+#if defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__) && \
+    __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+#define bpf_htons(x) __builtin_bswap16(x)
+#define bpf_ntohs(x) __builtin_bswap16(x)
+#else
+#define bpf_htons(x) (x)
+#define bpf_ntohs(x) (x)
+#endif
+
 #define SEC(name) __attribute__((section(name), used))
 
 /* BTF map definition macros (libbpf-compatible). */

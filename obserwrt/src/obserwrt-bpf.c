@@ -18,6 +18,12 @@
  */
 #include "bpf_helpers.h"
 
+/* Direction at the observation point. */
+enum direction {
+	INGRESS = 0,
+	EGRESS  = 1,
+};
+
 /* --- flow key / value (match docs/design.md §5) ---------------------- */
 
 struct flow_key {
@@ -51,15 +57,6 @@ struct {
 } obs_flows SEC(".maps");
 
 /* --- packet helpers --------------------------------------------------- */
-
-/* Read a big-endian u16 from a packet buffer. */
-static inline __u16
-rd_be16(const void *p)
-{
-	const __u8 *b = p;
-
-	return (__u16)((__u16)b[0] << 8 | b[1]);
-}
 
 /* Store a 4-byte IPv4 address as IPv4-mapped IPv6 (::ffff:a.b.c.d). */
 static inline void
@@ -122,15 +119,15 @@ observe(struct __sk_buff *skb, __u8 direction)
 		if (l4 + 14 > data_end)
 			return TC_ACT_OK;
 
-		sport = rd_be16(l4);
-		dport = rd_be16(l4 + 2);
+		sport = bpf_ntohs(*(__u16 *)l4);
+		dport = bpf_ntohs(*(__u16 *)(l4 + 2));
 		tcpf = *(l4 + 13);
 	} else if (proto == 17) {               /* UDP */
 		if (l4 + 4 > data_end)
 			return TC_ACT_OK;
 
-		sport = rd_be16(l4);
-		dport = rd_be16(l4 + 2);
+		sport = bpf_ntohs(*(__u16 *)l4);
+		dport = bpf_ntohs(*(__u16 *)(l4 + 2));
 	} else if (proto == 1 || proto == 58) { /* ICMP/ICMPv6 */
 		if (l4 + 2 > data_end)
 			return TC_ACT_OK;
@@ -187,13 +184,13 @@ observe(struct __sk_buff *skb, __u8 direction)
 SEC("classifier/ingress")
 int obserwrt_ingress(struct __sk_buff *skb)
 {
-	return observe(skb, 0);
+	return observe(skb, INGRESS);
 }
 
 SEC("classifier/egress")
 int obserwrt_egress(struct __sk_buff *skb)
 {
-	return observe(skb, 1);
+	return observe(skb, EGRESS);
 }
 
 char LICENSE[] SEC("license") = "Apache-2.0";
