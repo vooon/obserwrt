@@ -67,6 +67,12 @@ const FIELDS_V6 = [
 	[ 14,  4],
 ];
 
+/* Precompiled formats (avoids recompiling on every pack). */
+const PACK_V4 = struct.new(FMT_V4);
+const PACK_V6 = struct.new(FMT_V6);
+const MSG_HEADER = struct.new('!HHIII');   /* message header */
+const SET_HEADER = struct.new('!HH');      /* set / template-set header */
+
 let sock = null;
 let dest = null;              /* "ip:port" */
 let offset_ms = 0;            /* monotonic -> epoch conversion */
@@ -87,24 +93,24 @@ function mono_ms()
 
 function msg_header(msg_len)
 {
-	return struct.pack('!HHIII', VERSION, msg_len, time(), seq, OBS_DOMAIN);
+	return MSG_HEADER.pack(VERSION, msg_len, time(), seq, OBS_DOMAIN);
 }
 
 function template_set(tid, fields)
 {
-	let rec = struct.pack('!HH', tid, length(fields));
+	let rec = SET_HEADER.pack(tid, length(fields));
 
 	for (let i = 0; i < length(fields); i++)
-		rec += struct.pack('!HH', fields[i][0], fields[i][1]);
+		rec += SET_HEADER.pack(fields[i][0], fields[i][1]);
 
-	return struct.pack('!HH', SET_TEMPLATE, 4 + length(rec)) + rec;
+	return SET_HEADER.pack(SET_TEMPLATE, 4 + length(rec)) + rec;
 }
 
 /* Send one set as one datagram (single data set per datagram). The message
  * Length counts header(16) + set header(4) + records. */
 function emit_set(set_id, body, cnt)
 {
-	sock.send(msg_header(16 + 4 + length(body)) + struct.pack('!HH', set_id, 4 + length(body)) + body, 0, dest);
+	sock.send(msg_header(16 + 4 + length(body)) + SET_HEADER.pack(set_id, 4 + length(body)) + body, 0, dest);
 	seq += cnt;
 }
 
@@ -159,7 +165,7 @@ export function emit(k, v, expired)
 	let rec;
 
 	if (k.family == 4) {
-		rec = struct.pack(FMT_V4,
+		rec = PACK_V4.pack(
 			substr(k.src, 12, 4), substr(k.dst, 12, 4),
 			k.sport, k.dport, k.protocol,
 			v.packets, v.bytes,
@@ -171,7 +177,7 @@ export function emit(k, v, expired)
 		push(pending4, rec);
 	}
 	else {
-		rec = struct.pack(FMT_V6,
+		rec = PACK_V6.pack(
 			k.src, k.dst,
 			k.sport, k.dport, k.protocol,
 			v.packets, v.bytes,
@@ -220,13 +226,13 @@ export function init()
 		return false;
 
 	let host = ctx.get('obserwrt', 'ipfix', 'collector_host');
-	let source_addr = ctx.get('obserwrt', 'ipfix', 'source_address');
-	let port = parse_port(ctx.get('obserwrt', 'ipfix', 'collector_port'), 4739);
-
 	if (!host) {
 		WARN('ipfix: no collector_host configured');
 		return false;
 	}
+
+	let port = parse_port(ctx.get('obserwrt', 'ipfix', 'collector_port'), 4739);
+	let source_addr = ctx.get('obserwrt', 'ipfix', 'source_address');
 
 	return connect(host, port, source_addr);
 };
