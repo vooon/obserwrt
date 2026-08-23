@@ -1,6 +1,8 @@
 /* Shared configuration and observation helpers. */
 "use strict";
 
+import { readfile } from 'fs';
+
 /* Match OpenWrt's get_bool() accepted spellings. */
 export function bool_option(value, fallback)
 {
@@ -20,4 +22,23 @@ export function bool_option(value, fallback)
 	default:
 		return fallback;
 	}
+};
+
+/* Router hostname. Returns '' if it cannot be read. */
+export function sys_hostname()
+{
+	let name = readfile('/proc/sys/kernel/hostname');
+
+	if (name === null)
+		return '';
+	return rtrim(name);
+};
+
+/* RFC 3339 UTC timestamp (RFC 5424 TIMESTAMP form). */
+export function iso_timestamp()
+{
+	let t = gmtime(time());
+
+	return sprintf('%04d-%02d-%02dT%02d:%02d:%02dZ',
+		t.year, t.mon, t.mday, t.hour, t.min, t.sec);
 };

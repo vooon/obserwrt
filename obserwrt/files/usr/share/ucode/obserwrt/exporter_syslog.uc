@@ -9,36 +9,16 @@
 
 import * as socket from 'socket';
 import { cursor } from 'uci';
-import { readfile } from 'fs';
 import { ulog, WARN, LOG_INFO } from 'log';
 import { INGRESS } from './flow.uc';
 import { ifname } from './reconcile.uc';
-import { bool_option } from './util.uc';
+import { bool_option, sys_hostname, iso_timestamp } from './util.uc';
 
 let active = false;
 let local = false;
 let format = 'json';
 let sock = null;
 let self_host = '';
-
-/* Router hostname, so a collector can tell which probe emitted a message. */
-function sys_hostname()
-{
-	let name = readfile('/proc/sys/kernel/hostname');
-	if (name === null)
-		return '';
-
-	return rtrim(name);
-};
-
-/* RFC 5424 TIMESTAMP: ISO 8601, UTC. */
-function iso_timestamp()
-{
-	let t = gmtime(time());
-
-	return sprintf('%04d-%02d-%02dT%02d:%02d:%02dZ',
-		t.year, t.mon, t.mday, t.hour, t.min, t.sec);
-};
 
 function key_ip(value, family)
 {
@@ -104,8 +84,8 @@ function send(message)
 export function init()
 {
 	let ctx = cursor();
-	let enabled = ctx.get('obserwrt', 'syslog', 'enabled');
 
+	let enabled = ctx.get('obserwrt', 'syslog', 'enabled');
 	if (!bool_option(enabled, false))
 		return false;
 
