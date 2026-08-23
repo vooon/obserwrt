@@ -9,7 +9,7 @@
 
 "use strict";
 
-import { open_module, error as bpf_error, BPF_PROG_TYPE_SCHED_CLS } from 'bpf';
+import { open_module, tc_detach, error as bpf_error, BPF_PROG_TYPE_SCHED_CLS } from 'bpf';
 import * as struct from 'struct';
 
 const BPF_OBJ_LOC = getenv('BPF_OBJ') || '/lib/bpf/obserwrt-bpf.o';
@@ -53,6 +53,26 @@ export function load_bpf() {
 export function flows() { return bpf.flows; };
 export function ing()   { return bpf.ing; };
 export function eg()    { return bpf.eg; };
+
+/* tc hook name for a direction */
+const dir_str = function(d) { return (d == DIR.INGRESS) ? 'ingress' : 'egress'; };
+
+/* Attach the TC program at `direction` to a netdev. Returns null on success or
+ * an error message string. All the bpf() interaction lives here so that
+ * importing modules never need to touch the `bpf` module directly. */
+export function attach(name, direction, prio)
+{
+	let prog = (direction == DIR.INGRESS) ? ing() : eg();
+	let ok = prog.tc_attach(name, dir_str(direction), prio, 0);
+
+	return ok ? null : bpf_error();
+};
+
+/* Detach the TC program at `direction` from a netdev. */
+export function detach(name, direction, prio)
+{
+	tc_detach(name, dir_str(direction), prio);
+};
 
 /* Drop every flow map entry recorded for the given device incarnation. */
 export function purge_device(ifindex) {

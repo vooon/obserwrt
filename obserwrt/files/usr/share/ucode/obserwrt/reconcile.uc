@@ -8,11 +8,10 @@
 
 "use strict";
 
-import { tc_detach, error as bpf_error } from 'bpf';
 import { cursor } from 'uci';
 import { readfile } from 'fs';
 import { INFO, NOTE, WARN } from 'log';
-import { ing, eg, purge_device, DIR } from './flow.uc';
+import { attach, detach, purge_device, DIR } from './flow.uc';
 
 const PRIO = 10;      /* tc filter priority */
 
@@ -71,10 +70,12 @@ const attach_device = function(name, ifindex)
 		return;
 	}
 
-	if (!ing().tc_attach(name, 'ingress', PRIO, 0))
-		WARN('ingress attach %s: %s', name, bpf_error());
-	if (!eg().tc_attach(name, 'egress', PRIO, 0))
-		WARN('egress attach %s: %s', name, bpf_error());
+	let e;
+
+	if ((e = attach(name, DIR.INGRESS, PRIO)))
+		WARN('ingress attach %s: %s', name, e);
+	if ((e = attach(name, DIR.EGRESS, PRIO)))
+		WARN('egress attach %s: %s', name, e);
 
 	attached[name] = { ifindex: ifindex || ifindex_of(name) };
 	NOTE('attached %s (ifindex %d)', name, attached[name].ifindex);
@@ -85,8 +86,8 @@ const detach_device = function(name, ifindex)
 	if (!attached[name])
 		return;
 
-	tc_detach(name, 'ingress', PRIO);
-	tc_detach(name, 'egress', PRIO);
+	detach(name, DIR.INGRESS, PRIO);
+	detach(name, DIR.EGRESS, PRIO);
 	purge_device(ifindex);
 
 	delete attached[name];
