@@ -90,48 +90,35 @@ export function purge_device(ifindex) {
 const KEY_FMT = struct.new(KFMT);
 const VAL_FMT = struct.new(VFMT);
 
-/* "Type" of a flow key, in field order: name -> position in the packed key. */
-const KEY_SPEC = [
-	['ifindex',   0],
-	['direction', 1],
-	['family',    2],
-	['protocol',  3],
-	['src',       4],
-	['dst',       5],
-	['sport',     6],
-	['dport',     7],
-	['icmp_type', 8],
-	['icmp_code', 9],
-];
-
-/* "Type" of a flow value. */
-const VAL_SPEC = [
-	['packets',    0],
-	['bytes',      1],
-	['first_seen', 2],
-	['last_seen',  3],
-	['tcp_flags',  4],
-];
-
-/* Build an object of the given spec from the unpacked value array. */
-const from_spec = function(spec, u)
-{
-	let o = {};
-
-	for (let i = 0; i < length(spec); i++)
-		o[spec[i][0]] = u[spec[i][1]];
-
-	return o;
-};
-
 /* Decode a raw flow-map key (bytes) into a key object. */
 export function parse_key(raw)
 {
-	return from_spec(KEY_SPEC, KEY_FMT.unpack(raw));
+	let u = KEY_FMT.unpack(raw);
+
+	return {
+		ifindex:   u[0],
+		direction: u[1],
+		family:    u[2],
+		protocol:  u[3],
+		src:       u[4],
+		dst:       u[5],
+		sport:     u[6],
+		dport:     u[7],
+		icmp_type: u[8],
+		icmp_code: u[9],
+	};
 };
 
 /* Decode a raw flow-map value (bytes) into a value object. */
 export function parse_value(raw)
 {
-	return from_spec(VAL_SPEC, VAL_FMT.unpack(raw));
+	let u = VAL_FMT.unpack(raw);
+
+	return {
+		packets:    u[0],
+		bytes:      u[1],
+		first_seen: u[2],
+		last_seen:  u[3],
+		tcp_flags:  u[4],
+	};
 };
