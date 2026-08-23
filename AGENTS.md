@@ -157,6 +157,9 @@ Known non-JS gotchas that have already bitten this project:
 - Undefined identifiers raise runtime "left-hand side is not a function"-style
   errors, and `import` resolution needs the `ucode-mod-*` `.so` present (so a
   CLI `ucode -c` syntax check requires stubbing imports — see CI).
+- **uci option values are strings.** Parse explicitly: `int(ctx.get('obserwrt',
+  'main', 'x'))` for a number, and for a bool use `int()`/explicit truthy
+  (`v == '1' && v`). List options (`list device …`) return an array.
 
 When in doubt, check the docs rather than assuming ECMAScript semantics.
 
