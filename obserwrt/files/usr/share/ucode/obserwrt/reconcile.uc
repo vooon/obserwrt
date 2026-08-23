@@ -84,17 +84,19 @@ function attach_device(name, ifindex)
 	NOTE('attached %s (ifindex %d)', name, attached[name].ifindex);
 };
 
-function detach_device(name, ifindex)
+function detach_device(name)
 {
-	if (!attached[name])
+	let info = attached[name];
+
+	if (!info)
 		return;
 
 	detach(name, INGRESS, PRIO);
 	detach(name, EGRESS, PRIO);
-	purge_device(ifindex);
+	purge_device(info.ifindex);
 
 	delete attached[name];
-	NOTE('detached %s (ifindex %d)', name, ifindex);
+	NOTE('detached %s (ifindex %d)', name, info.ifindex);
 };
 
 /* Enumerate current netifd devices and attach any that match (startup/safety).
@@ -140,8 +142,7 @@ export function on_device_event(ev)
 			break;
 		case 'remove':
 		case 'down':
-			if (attached[name])
-				detach_device(name, attached[name].ifindex);
+			detach_device(name);   /* detach_device guards on attached[name] */
 			break;
 		}
 	}
