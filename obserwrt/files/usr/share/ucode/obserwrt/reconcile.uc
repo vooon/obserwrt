@@ -28,12 +28,12 @@ function load_devices()
 		if (v === null)
 			return pats;
 		if (type(v) == 'array') {
-			/* ucode: `for..in` over arrays yields the elements, not indices */
+			/* ucode `for..in` yields the elements; uci returns strings already */
 			for (let item in v)
-				push(pats, sprintf('%s', item));
+				push(pats, item);
 		}
 		else {
-			push(pats, sprintf('%s', v));
+			push(pats, v);
 		}
 	}
 	catch (e) {
