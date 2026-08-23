@@ -4,3 +4,11 @@ config obserwrt 'main'
 	#
 	# list device 'awg_*'
 	# list device 'tun_*'
+
+# IPFIX exporter (opt-in). Uncomment to send flows to a collector via UDP 4739.
+# `destination` is an IP address (hostname resolution is a follow-up).
+#
+# config exporter 'ipfix'
+# 	option type 'ipfix'
+# 	option destination '192.0.2.10'
+# 	option port '4739'

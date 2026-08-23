@@ -14,17 +14,31 @@ import { ulog_open, ulog, WARN, ERR, ULOG_SYSLOG, LOG_DAEMON, LOG_DEBUG } from '
 import { load_bpf } from './flow.uc';
 import { snapshot, on_device_event, export_flow } from './reconcile.uc';
 import { run as lifecycle_pass } from './lifecycle.uc';
+import { init as ipfix_init, emit as ipfix_emit, flush as ipfix_flush } from './exporter.uc';
 
 const SNAP_S = 5;       /* counter snapshot interval (seconds) */
 const RECONCIL_S = 30;  /* slow safety device reconcile interval (seconds) */
 
+let ipfix_active = false;
+
 ulog_open(ULOG_SYSLOG, LOG_DAEMON, "obserwrt");
+
+/* Dispatches one flow to all exporters (debug log + IPFIX). */
+function emit_flow(k, v, expired)
+{
+	export_flow(k, v, expired);
+
+	if (ipfix_active)
+		ipfix_emit(k, v, expired);
+}
 
 function main()
 {
 	uloop_init();
 
 	load_bpf();
+
+	ipfix_active = ipfix_init();
 
 	let ubus = connect();
 	if (!ubus)
@@ -54,9 +68,11 @@ function main()
 
 	interval(SNAP_S * 1000, function () {
 		try {
-			let n = lifecycle_pass(export_flow);
+			let n = lifecycle_pass(emit_flow);
 			if (n.active == 0 && n.expired == 0)
 				ulog(LOG_DEBUG, 'snapshot: no counters observed yet');
+			if (ipfix_active)
+				ipfix_flush();
 		}
 		catch (e) {
 			WARN('lifecycle: %s', e);

@@ -65,6 +65,7 @@ obserwrt/                     # OpenWrt package (also a feed root)
 ├── files/usr/share/ucode/obserwrt/flow.uc        # BPF map access
 ├── files/usr/share/ucode/obserwrt/reconcile.uc   # device lifecycle + reporting
 ├── files/usr/share/ucode/obserwrt/lifecycle.uc   # flow expiry/export pass
+├── files/usr/share/ucode/obserwrt/exporter.uc   # IPFIX exporter
 └── src/obserwrt-bpf.c        # TC ingress/egress sections
 ```
 
@@ -81,7 +82,7 @@ are non-package).
 ## Dependencies
 
 `ucode`, `ucode-mod-bpf`, `ucode-mod-ubus`, `ucode-mod-struct`, `ucode-mod-log`,
-`ucode-mod-fs`, `ucode-mod-uloop`.
+`ucode-mod-fs`, `ucode-mod-uloop`, `ucode-mod-socket`.
 eBPF object is built from source via `include/bpf.mk` (BPF toolchain), never
 checked in.
 

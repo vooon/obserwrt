@@ -28,7 +28,7 @@ define Package/obserwrt
   SUBMENU:=obserwrt
   TITLE:=eBPF network observability agent
   URL:=https://github.com/vooon/obserwrt
-  DEPENDS:=+ucode +ucode-mod-bpf +ucode-mod-ubus +ucode-mod-struct +ucode-mod-log +ucode-mod-fs +ucode-mod-uloop +libbpf $(BPF_DEPENDS)
+  DEPENDS:=+ucode +ucode-mod-bpf +ucode-mod-ubus +ucode-mod-struct +ucode-mod-log +ucode-mod-fs +ucode-mod-uloop +ucode-mod-socket +libbpf $(BPF_DEPENDS)
 endef
 
 define Package/obserwrt/description
@@ -53,6 +53,7 @@ define Package/obserwrt/install
 		./files/usr/share/ucode/obserwrt/flow.uc \
 		./files/usr/share/ucode/obserwrt/reconcile.uc \
 		./files/usr/share/ucode/obserwrt/lifecycle.uc \
+		./files/usr/share/ucode/obserwrt/exporter.uc \
 		$(1)/usr/share/ucode/obserwrt/
 	$(INSTALL_DATA) ./files/etc/config/obserwrt $(1)/etc/config/
 	$(INSTALL_BIN) ./files/etc/init.d/obserwrt $(1)/etc/init.d/
