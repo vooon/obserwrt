@@ -61,9 +61,17 @@ architectural changes. Do not let the implementation drift from it.
 obserwrt/                     # OpenWrt package (also a feed root)
 ├── files/etc/config/obserwrt # UCI
 ├── files/etc/init.d/obserwrt # procd
-├── files/usr/libexec/obserwrt/obserwrt.uc
+├── files/usr/share/ucode/obserwrt/obserwrt.uc    # procd entry
+├── files/usr/share/ucode/obserwrt/flow.uc        # BPF map access
+├── files/usr/share/ucode/obserwrt/reconcile.uc   # device lifecycle + reporting
 └── src/obserwrt-bpf.c        # TC ingress/egress sections
 ```
+
+The `.uc` scripts are split into modules under `/usr/share/ucode/obserwrt/`
+(OpenWrt ucode convention — cf. `fw4.uc`, `cli/`, `node-exporter/`). The entry
+`obserwrt.uc` imports `flow.uc` and `reconcile.uc`. ucode `.uc` modules use
+`export const foo = function(){...}` (not `export function foo(){}`, which this
+target's ucode rejects) and `import { foo } from './flow.uc'`.
 
 The repo is used directly as an OpenWrt package feed; package sources under the
 top-level `obserwrt/` package dir (all other top-level dirs, `.github`, `docs`,
@@ -83,8 +91,8 @@ Checks (defined in `.github/workflows/ci.yml`):
 # Shell-syntax check the procd service (POSIX sh)
 shellcheck obserwrt/files/etc/init.d/obserwrt
 
-# ucode bytecode/compile check (no exec; `-c`)
-ucode -c obserwrt/files/usr/libexec/obserwrt/obserwrt.uc
+# ucode bytecode/compile check (no exec; `-c`; requires stubbing imports)
+# for f in obserwrt/files/usr/share/ucode/obserwrt/*.uc; do ...; done
 
 # eBPF compile smoke, both byte orders
 clang -O2 -g -target bpfel -Iobserwrt/src/include -c obserwrt/src/obserwrt-bpf.c -o /tmp/bpfel.o
@@ -97,7 +105,7 @@ after any change to `.uc`, `init.d`, or `.c`.
 Run the ucode agent directly with a config-files path during development:
 
 ```sh
-ucode -lstruct -lubus -lbpf -e 'import("obserwrt/files/usr/libexec/obserwrt/obserwrt.uc")'
+ucode -lstruct -lubus -lbpf -e 'import("obserwrt/files/usr/share/ucode/obserwrt/obserwrt.uc")'
 ```
 
 ## ucode (the agent language) is NOT JavaScript
@@ -117,6 +125,10 @@ docs, which are authoritative:
 
 Known non-JS gotchas that have already bitten this project:
 
+- **`export function foo(){}` is rejected by this ucode.** `.uc` modules export
+  via `export const foo = function(){...}`; import them with
+  `import { foo } from './foo.uc'` (relative path, like node-exporter's
+  `import { fetch_json } from '../http_client.uc'`).
 - **No function hoisting.** A function declared later in the file is undefined
   when called earlier. Declare before use, or assign at the bottom near `main()`.
 - **No `arr.push()` / `arr.map()` etc. as methods.** Arrays use *global*

@@ -44,11 +44,15 @@ endef
 define Package/obserwrt/install
 	$(INSTALL_DIR) \
 		$(1)/usr/lib/obserwrt \
-		$(1)/usr/libexec/obserwrt \
+		$(1)/usr/share/ucode/obserwrt \
 		$(1)/etc/config \
 		$(1)/etc/init.d
 	$(INSTALL_DATA) $(PKG_BUILD_DIR)/obserwrt-bpf.o $(1)/usr/lib/obserwrt/
-	$(INSTALL_BIN) ./files/usr/libexec/obserwrt/obserwrt.uc $(1)/usr/libexec/obserwrt/
+	$(INSTALL_DATA) \
+		./files/usr/share/ucode/obserwrt/obserwrt.uc \
+		./files/usr/share/ucode/obserwrt/flow.uc \
+		./files/usr/share/ucode/obserwrt/reconcile.uc \
+		$(1)/usr/share/ucode/obserwrt/
 	$(INSTALL_DATA) ./files/etc/config/obserwrt $(1)/etc/config/
 	$(INSTALL_BIN) ./files/etc/init.d/obserwrt $(1)/etc/init.d/
 endef

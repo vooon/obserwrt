@@ -374,7 +374,9 @@ obserwrt/
     ├── Makefile
     ├── files/etc/config/obserwrt
     ├── files/etc/init.d/obserwrt
-    ├── files/usr/libexec/obserwrt/obserwrt.uc
+    ├── files/usr/share/ucode/obserwrt/obserwrt.uc  # procd entry
+    ├── files/usr/share/ucode/obserwrt/flow.uc
+    ├── files/usr/share/ucode/obserwrt/reconcile.uc
     └── src/obserwrt-bpf.c
 ```
 
