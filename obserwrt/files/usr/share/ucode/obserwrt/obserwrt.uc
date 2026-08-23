@@ -43,6 +43,8 @@ function main()
 
 	ipfix_active = ipfix_init();
 	syslog_active = syslog_init();
+	if (!ipfix_active && !syslog_active)
+		WARN('no exporters enabled; observations will not be exported');
 
 	let ubus = connect();
 	if (!ubus)
