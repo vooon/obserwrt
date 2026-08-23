@@ -140,14 +140,14 @@ export function attached_names()
 export function on_device_event(ev)
 {
 	try {
-		let type = ev && ev.type;
+		let etype = ev && ev.type;
 		let data = ev ? ev.data : null;
 		let name = (data && type(data) == 'object') ? data.name : null;
 
 		if (!name)
 			return;
 
-		switch (type) {
+		switch (etype) {
 		case 'add':
 		case 'up':
 			if (glob_match(name))
