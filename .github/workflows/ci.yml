@@ -54,7 +54,12 @@ jobs:
         if: ${{ hashFiles('obserwrt/files/usr/share/ucode/obserwrt/*.uc') != '' }}
         run: |
           set -euo pipefail
-          git clone --depth 1 https://github.com/jow-/ucode /tmp/ucode-src
+          # Pin the ucode revision OpenWrt 25.12 ships (package/utils/ucode
+          # Makefile; PKG_SOURCE_VERSION below). Bump deliberately.
+          git init -q /tmp/ucode-src
+          git -C /tmp/ucode-src remote add origin https://github.com/jow-/ucode
+          git -C /tmp/ucode-src fetch --depth 1 origin b885dd0fe1e974551fb1233ca5f3aa74d80b74d9
+          git -C /tmp/ucode-src checkout -q FETCH_HEAD
           cmake -S /tmp/ucode-src -B /tmp/ucode-src/build -DBUILD_UCODE_MODULES=ON
           cmake --build /tmp/ucode-src/build -j"$(nproc)"
 
