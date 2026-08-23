@@ -141,10 +141,11 @@ Known non-JS gotchas that have already bitten this project:
   node-exporter's `import { fetch_json } from '../http_client.uc'`).
 - **No function hoisting.** A function declared later in the file is undefined
   when called earlier. Declare before use, or assign at the bottom near `main()`.
-  Note: ucode's `function name;` forward-declaration (docs §4.2) works only for
-  *internal* mutual recursion — do **not** use it for a `parse_key`-style
-  exported function, because the forward declaration shadows the later
-  `export function` and the module silently stops exporting it.
+  For an *exported* function referenced earlier, use ucode's forward declaration
+  `export function name;` (docs §4.2) — this keeps the export binding. A plain
+  `function name;` would shadow the later `export function name` and silently
+  stop the module exporting it, so avoid that form. `scripts/uc-lint.mjs` strips
+  forward-declaration lines (`[export ]function name;`) before the node check.
 - **No `arr.push()` / `arr.map()` etc. as methods.** Arrays use *global*
   functions: `push(arr, …)`, `filter(arr, fn)`, `map(arr, fn)`, `pop(arr)`.
 - **No string `[]` indexing.** `s[i]` raises `left-hand side expression is not an
