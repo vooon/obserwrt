@@ -73,14 +73,6 @@ export function detach(name, direction, prio)
 	tc_detach(name, dir_str(direction), prio);
 };
 
-/* Drop every flow map entry recorded for the given device incarnation. */
-export function purge_device(ifindex) {
-	flows().delete_all(
-		function (key) {
-			return parse_key(key).ifindex == ifindex;
-		});
-};
-
 /* --- wire-format parsing (the single struct owner) ------------------- */
 
 /* Precompiled formats (flow key = 46 B '<LBBBx16s16sHHBB', value = 40 B
@@ -119,4 +111,13 @@ export function parse_value(raw)
 		last_seen:  u[3],
 		tcp_flags:  u[4],
 	};
+};
+
+/* Drop every flow map entry recorded for the given device incarnation. Define
+ * after parse_key: closures capture by position (no hoisting in ucode). */
+export function purge_device(ifindex) {
+	flows().delete_all(
+		function (key) {
+			return parse_key(key).ifindex == ifindex;
+		});
 };
