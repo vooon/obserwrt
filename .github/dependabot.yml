@@ -1,0 +1,10 @@
+version: 2
+updates:
+  # Keep the pinned GitHub Actions (actions/checkout) current. The npm
+  # ecosystem is intentionally omitted: the root package.json defines only
+  # scripts (`engines`/`scripts`) and declares no dependencies.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
