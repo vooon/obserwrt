@@ -51,8 +51,9 @@ export function load_bpf() {
 };
 
 export function flows() { return bpf.flows; };
-export function ing()   { return bpf.ing; };
-export function eg()    { return bpf.eg; };
+/* TC hook programs (internal; attach/detach are the public interface). */
+const ingress_hook = function() { return bpf.ing; };
+const egress_hook  = function() { return bpf.eg; };
 
 /* tc hook name for a direction */
 const dir_str = function(d) { return (d == DIR.INGRESS) ? 'ingress' : 'egress'; };
@@ -62,7 +63,7 @@ const dir_str = function(d) { return (d == DIR.INGRESS) ? 'ingress' : 'egress'; 
  * importing modules never need to touch the `bpf` module directly. */
 export function attach(name, direction, prio)
 {
-	let prog = (direction == DIR.INGRESS) ? ing() : eg();
+	let prog = (direction == DIR.INGRESS) ? ingress_hook() : egress_hook();
 	let ok = prog.tc_attach(name, dir_str(direction), prio, 0);
 
 	return ok ? null : bpf_error();
