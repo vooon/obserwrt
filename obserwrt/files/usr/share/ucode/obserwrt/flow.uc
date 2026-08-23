@@ -1,21 +1,26 @@
 /*
- * obserwrt - BPF map access (flow.uc)
+ * obserwrt - BPF flow map access (flow.uc)
  *
- * Loads the eBPF module and exposes the flow map and TC programs. Imported by
- * obserwrt.uc and reconcile.uc. Uses ucode's .uc module idiom:
- *   import { flows, load_bpf } from './flow.uc'
- * (this ucode only supports `export const`, functions assigned to consts).
+ * Single point of ownership for the flow key/value wire formats and the BPF
+ * map. Other modules never touch `struct` directly - they use the parse
+ * helpers and map accessors exported here:
+ *   import { flows, parse_key, purge_device } from './flow.uc'
  */
 import { open_module, error as bpf_error, BPF_PROG_TYPE_SCHED_CLS } from 'bpf';
 import * as struct from 'struct';
 
 const BPF_OBJ_LOC = getenv('BPF_OBJ') || '/lib/bpf/obserwrt-bpf.o';
 
-/* flow key/value layouts (docs/design.md §5) */
-export const KFMT = '<LBBBx16s16sHHBB';   /* 46 B */
-export const VFMT = '<QQQQH6x';           /* 40 B */
+/* flow key/value layouts (docs/design.md §5) - private, use the parse helpers */
+const KFMT = '<LBBBx16s16sHHBB';   /* 46 B */
+const VFMT = '<QQQQH6x';           /* 40 B */
+
+/* Direction at the observation point (mirrors the BPF enum). */
+export const DIR = { INGRESS: 0, EGRESS: 1 };
 
 let bpf = null;   /* loaded module refs */
+
+/* --- map access ------------------------------------------------------ */
 
 /* Load and verify the eBPF module. Idempotent; returns the refs. */
 export const load_bpf = function() {
@@ -50,6 +55,41 @@ export const eg    = function() { return bpf.eg; };
 export const purge_device = function(ifindex) {
 	flows().delete_all(
 		function (key) {
-			return struct.unpack(KFMT, key)[0] == ifindex;
+			return parse_key(key).ifindex == ifindex;
 		});
+};
+
+/* --- wire-format parsing (the single struct owner) ------------------- */
+
+/* Decode a raw flow-map key (bytes) into a structured object. */
+export const parse_key = function(raw)
+{
+	let u = struct.unpack(KFMT, raw);
+
+	return {
+		ifindex:   u[0],
+		direction: u[1],
+		family:    u[2],
+		protocol:  u[3],
+		src:       u[4],
+		dst:       u[5],
+		sport:     u[6],
+		dport:     u[7],
+		icmp_type: u[8],
+		icmp_code: u[9],
+	};
+};
+
+/* Decode a raw flow-map value (bytes) into a structured object. */
+export const parse_value = function(raw)
+{
+	let u = struct.unpack(VFMT, raw);
+
+	return {
+		packets:    u[0],
+		bytes:      u[1],
+		first_seen: u[2],
+		last_seen:  u[3],
+		tcp_flags:  u[4],
+	};
 };

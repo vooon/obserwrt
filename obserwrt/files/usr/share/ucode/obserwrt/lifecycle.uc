@@ -10,8 +10,7 @@
  * CLOCK_MONOTONIC. ucode's clock(true) reads the same clock, so ages are
  * comparable directly.
  */
-import * as struct from 'struct';
-import { flows, KFMT, VFMT } from './flow.uc';
+import { flows, parse_key, parse_value } from './flow.uc';
 
 const INACTIVE_S = 10;   /* expire/delete a flow idle longer than this */
 const ACTIVE_S   = 60;   /* active timeout: long-lived flows are re-exported
@@ -27,8 +26,8 @@ const now_ns = function()
 	return c[0] * 1000000000 + c[1];
 };
 
-/* One lifecycle pass. `exporter(k, v, expired)` receives the unpacked key and
- * value arrays. Returns { active, expired } counts. Flows idle longer than
+/* One lifecycle pass. `exporter(k, v, expired)` receives the parsed flow key
+ * and value objects. Returns { active, expired } counts. Flows idle longer than
  * INACTIVE_S are exported as expired and deleted from the map. */
 export const run = function(exporter)
 {
@@ -36,9 +35,9 @@ export const run = function(exporter)
 	let n = { active: 0, expired: 0 };
 
 	flows().foreach(function (key) {
-		let k = struct.unpack(KFMT, key);
-		let v = struct.unpack(VFMT, flows().get(key));
-		let age_s = (now - v[3]) / 1000000000.0;
+		let k = parse_key(key);
+		let v = parse_value(flows().get(key));
+		let age_s = (now - v.last_seen) / 1000000000.0;
 
 		if (age_s > INACTIVE_S) {
 			exporter(k, v, true);
