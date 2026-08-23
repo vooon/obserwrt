@@ -143,7 +143,8 @@ Known non-JS gotchas that have already bitten this project:
 - **No string `[]` indexing.** `s[i]` raises `left-hand side expression is not an
   array or object`. Use `substr(s, i, 1)` or `ord(s, i)` to read a character.
 - **`for (x in arr)` yields elements, not indices** (on objects it yields keys).
-  For array indices iterate `i = 0..length(arr)-1`.
+  Use `for (item in arr)` directly when you want the elements; iterate
+  `i = 0..length(arr)-1` only when you need the index.
 - **No `throw` statement** (there is `try`/`catch`; use `die()` to raise).
 - **No `RegExp` / `new RegExp`.** Use `regexp(source, flags)` plus `match(str, re)`,
   or the built-in `wildcard(subject, pattern[, nocase])` (fnmatch-based glob) for

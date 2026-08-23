@@ -34,7 +34,7 @@ function main()
 		snapshot(ubus);
 	}
 	catch (e) {
-		WARN('initial snapshot: %s', sprintf('%s', e));
+		WARN('initial snapshot: %s', e);
 	}
 
 	let last = time();
@@ -51,7 +51,7 @@ function main()
 				snapshot(ubus);
 			}
 			catch (e) {
-				WARN('snapshot: %s', sprintf('%s', e));
+				WARN('snapshot: %s', e);
 			}
 			last_reconcil = now;
 		}
@@ -63,7 +63,7 @@ function main()
 					ulog(LOG_DEBUG, 'snapshot: no counters observed yet');
 			}
 			catch (e) {
-				WARN('lifecycle: %s', sprintf('%s', e));
+				WARN('lifecycle: %s', e);
 			}
 			last = now;
 		}
@@ -74,6 +74,6 @@ try {
 	main();
 }
 catch (e) {
-	ERR('fatal: %s', sprintf('%s', e));
+	ERR('fatal: %s', e);
 	exit(1);
 }

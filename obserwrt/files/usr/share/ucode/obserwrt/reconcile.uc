@@ -28,16 +28,19 @@ function load_devices()
 		if (v === null)
 			return pats;
 		if (type(v) == 'array') {
-			/* ucode: `for..in` over arrays yields elements, not indices */
-			for (let i = 0; i < length(v); i++)
-				push(pats, sprintf('%s', v[i]));
+			/* ucode: `for..in` over arrays yields the elements, not indices */
+			for (let item in v)
+				push(pats, sprintf('%s', item));
 		}
 		else {
 			push(pats, sprintf('%s', v));
 		}
 	}
 	catch (e) {
-		/* config missing/empty: fall through to empty device set */
+		/* a missing/empty config returns null above (not an error); an exception
+		 * here is a real problem - surface it instead of silently observing
+		 * nothing */
+		WARN('cannot read device config: %s', e);
 	}
 	return pats;
 };
@@ -57,7 +60,7 @@ function glob_match(name)
  * expose it. Returns 0 if the netdev is absent. */
 function ifindex_of(name)
 {
-	let v = readfile('/sys/class/net/' + name + '/ifindex');
+	let v = readfile(`/sys/class/net/${name}/ifindex`);
 
 	return (v === null) ? 0 : int(v);
 };
@@ -143,7 +146,7 @@ export function on_device_event(ev)
 		}
 	}
 	catch (e) {
-		WARN('device event error: %s', sprintf('%s', e));
+		WARN('device event error: %s', e);
 	}
 };
 
