@@ -80,7 +80,8 @@ are non-package).
 
 ## Dependencies
 
-`ucode`, `ucode-mod-bpf`, `ucode-mod-ubus`, `ucode-mod-struct`, `ucode-mod-log`.
+`ucode`, `ucode-mod-bpf`, `ucode-mod-ubus`, `ucode-mod-struct`, `ucode-mod-log`,
+`ucode-mod-fs`, `ucode-mod-uloop`.
 eBPF object is built from source via `include/bpf.mk` (BPF toolchain), never
 checked in.
 
