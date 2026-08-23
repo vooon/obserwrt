@@ -40,6 +40,7 @@ export function load_bpf() {
 
 	handle = {
 		flows:   mod.get_map('obserwrt_flows'),
+		stats:   mod.get_map('obserwrt_stats'),
 		ingress: mod.get_program('obserwrt_ingress'),
 		egress:  mod.get_program('obserwrt_egress'),
 	};
@@ -49,6 +50,23 @@ export function load_bpf() {
 
 export function flows() {
 	return handle.flows;
+};
+
+/* Per-instance aggregate counters (see obserwrt-bpf.c enum). Returned as
+ * { packets, bytes, flows_created }. Counter values are exact even when the LRU
+ * flow map evicts entries. */
+const STAT_NAMES = [ 'packets', 'bytes', 'flows_created' ];
+
+export function bpf_stats() {
+	let out = {};
+
+	for (let i = 0; i < length(STAT_NAMES); i++) {
+		let raw = handle.stats.get(struct.pack('<I', i));
+
+		out[STAT_NAMES[i]] = (raw === null) ? 0 : struct.unpack('<Q', raw)[0];
+	}
+
+	return out;
 };
 
 /* tc hook name for a direction */
