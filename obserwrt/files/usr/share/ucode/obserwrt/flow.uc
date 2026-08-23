@@ -50,9 +50,14 @@ export function load_bpf() {
 	return handle;
 };
 
-export function flows() { return handle.flows; };
+export function flows() {
+	return handle.flows;
+};
+
 /* tc hook name for a direction */
-const dir_str = function(d) { return (d == DIR.INGRESS) ? 'ingress' : 'egress'; };
+function dir_str(d) {
+	return (d == DIR.INGRESS) ? 'ingress' : 'egress';
+};
 
 /* Attach the TC program at `direction` to a netdev. Returns null on success or
  * an error message string. All the bpf() interaction lives here so that
