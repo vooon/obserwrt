@@ -108,8 +108,9 @@ node scripts/uc-lint.mjs
 #   clang -O2 -g -target bpfeb $inc -c src/obserwrt-bpf.c -o /tmp/bpfeb.o
 ```
 
-There is no test suite yet; CI runs the above and a feed-layout check. Run them
-after any change to `.uc`, `init.d`, or `.c`.
+CI runs the static checks above and a feed-layout check. The ucode unit tests
+run where ucode and its OpenWrt modules are available. Run them after changes
+to `.uc`, `init.d`, or `.c`.
 
 Run the ucode agent directly with a config-files path during development:
 
@@ -193,11 +194,16 @@ When in doubt, check the docs rather than assuming ECMAScript semantics.
   fields. Needs ucode with the struct/socket/uci/log modules to run the emitter.
   `exporter_ipfix.connect(host, port, source_addr)` is exported so the exporter
   can be driven directly.
-- **Unit tests (planned, fw4-style):** follow firewall4's pattern — a
-  `tests/lib/mocklib.uc` that stubs modules (`socket`/`uci`, keeps real
-  `struct`), declarative `tests/NN_…/NN_…` cases with `-- Expect stdout/stderr/
-  exitcode --` sections, and `run_tests.sh` that runs `ucode -S -l mocklib`
-  and diffs. `ucode -c`/`node scripts/uc-lint.mjs` are the CI static checks.
+- **Unit tests** (`obserwrt/tests/run_tests.sh`): fw4-style declarative tests
+  exercise the exporter with mocked `socket`, `uci`, `log`, and `bpf` modules
+  while retaining real `struct` packing/unpacking. The mocklib and runner are
+  adapted from OpenWrt firewall4's ISC-licensed test framework; attribution is
+  retained in the copied files. Run from the repository with a local ucode
+  module glob, for example:
+  `UCODE_BIN=... UCODE_MODULES='/usr/lib/ucode/*.so' obserwrt/tests/run_tests.sh`
+  or against installed modules with
+  `MODDIR=/usr/share/ucode/obserwrt`. The tests cover IPFIX v4/v6 encoding,
+  UCI initialization, source binding, sequence numbers, and UDP chunking.
 
 ## Milestones (see design §13)
 

@@ -16,7 +16,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const dir = path.join(repoRoot, 'obserwrt/files/usr/share/ucode/obserwrt');
+const dirs = [
+	path.join(repoRoot, 'obserwrt/files/usr/share/ucode/obserwrt'),
+	path.join(repoRoot, 'obserwrt/tests/lib'),        /* mocklib + submodule mocks */
+	path.join(repoRoot, 'obserwrt/tests/lib/mocklib'),
+];
 
 let failed = 0;
 
@@ -25,6 +29,8 @@ function err(file, msg) {
 	failed = 1;
 }
 
+for (const dir of dirs) {
+const syntaxCheck = dir.endsWith('obserwrt/files/usr/share/ucode/obserwrt');
 for (const file of readdirSync(dir).filter((f) => f.endsWith('.uc'))) {
 	const src = readFileSync(path.join(dir, file), 'utf8');
 
@@ -33,7 +39,7 @@ for (const file of readdirSync(dir).filter((f) => f.endsWith('.uc'))) {
 		input: src,
 		encoding: 'utf8',
 	});
-	if (r.status !== 0)
+	if (syntaxCheck && r.status !== 0)
 		err(file, `syntax:\n${r.stderr}`);
 
 	// 2) ucode-specific rules
@@ -84,6 +90,7 @@ for (const file of readdirSync(dir).filter((f) => f.endsWith('.uc'))) {
 				err(file, `'${id}' is a string and not []-indexable (line ${ln + 1}): "${line.trim()}"`);
 		}
 	});
+}
 }
 
 if (failed)
