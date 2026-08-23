@@ -2,7 +2,7 @@
 {
   "exporter_syslog": {
     ".name": "syslog",
-    "enabled": "1",
+    "enabled": "yes",
     "destination": "",
     "format": "json"
   }

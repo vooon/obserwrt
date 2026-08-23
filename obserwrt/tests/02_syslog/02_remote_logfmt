@@ -2,7 +2,7 @@
 {
   "exporter_syslog": {
     ".name": "syslog",
-    "enabled": "1",
+    "enabled": "on",
     "destination": "192.0.2.10",
     "port": "5514",
     "protocol": "udp",

@@ -75,6 +75,27 @@ let pending4 = [];            /* raw v4 record byte strings */
 let pending6 = [];            /* raw v6 record byte strings */
 let last_template_sent = 0;
 
+/* Match OpenWrt's get_bool() accepted spellings. */
+function bool_option(value, fallback)
+{
+	switch (value) {
+	case '1':
+	case 'on':
+	case 'true':
+	case 'yes':
+	case 'enabled':
+		return true;
+	case '0':
+	case 'off':
+	case 'false':
+	case 'no':
+	case 'disabled':
+		return false;
+	default:
+		return fallback;
+	}
+};
+
 /* monotonic "now" in ms (CLOCK_MONOTONIC, same as bpf_ktime_get_ns) */
 function mono_ms()
 {
@@ -213,7 +234,7 @@ export function init()
 		const ctx = cursor();
 		let enabled = ctx.get('obserwrt', 'ipfix', 'enabled');
 
-		if (enabled != '1')
+		if (!bool_option(enabled, false))
 			return false;
 
 		host = ctx.get('obserwrt', 'ipfix', 'collector_host');

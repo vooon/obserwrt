@@ -17,6 +17,27 @@ let local = false;
 let format = 'json';
 let sock = null;
 
+/* Match OpenWrt's get_bool() accepted spellings. */
+function bool_option(value, fallback)
+{
+	switch (value) {
+	case '1':
+	case 'on':
+	case 'true':
+	case 'yes':
+	case 'enabled':
+		return true;
+	case '0':
+	case 'off':
+	case 'false':
+	case 'no':
+	case 'disabled':
+		return false;
+	default:
+		return fallback;
+	}
+};
+
 function key_ip(value, family)
 {
 	let offset = (family == 4) ? 12 : 0;
@@ -81,7 +102,7 @@ export function init()
 	let ctx = cursor();
 	let enabled = ctx.get('obserwrt', 'syslog', 'enabled');
 
-	if (enabled != '1')
+	if (!bool_option(enabled, false))
 		return false;
 
 	format = ctx.get('obserwrt', 'syslog', 'format') || 'json';
