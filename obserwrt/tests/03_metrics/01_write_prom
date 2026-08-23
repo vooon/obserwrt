@@ -28,7 +28,7 @@ metrics.observe(null, null, false);
 
 metrics.record_error();
 
-metrics.state({ active: 2, map: 3, packets: 16, bytes: 1464 }, [ 'awg_sp_pa', 'awg_sp_ka' ]);
+metrics.set_state({ active: 2, map: 3, packets: 16, bytes: 1464 }, [ 'awg_sp_pa', 'awg_sp_ka' ]);
 
 metrics.write();
 

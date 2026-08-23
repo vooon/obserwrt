@@ -14,7 +14,7 @@ import { ulog_open, ulog, WARN, ERR, ULOG_SYSLOG, LOG_DAEMON, LOG_DEBUG } from '
 import { load_bpf } from './flow.uc';
 import { snapshot, on_device_event, attached_names } from './reconcile.uc';
 import { run as lifecycle_pass } from './lifecycle.uc';
-import { init as metrics_init, observe as metrics_observe, record_error as metrics_error, state as metrics_state, write as metrics_write, interval as metrics_interval } from './metrics.uc';
+import { init as metrics_init, observe as metrics_observe, record_error as metrics_error, set_state as metrics_state, write as metrics_write, interval as metrics_interval } from './metrics.uc';
 import { init as ipfix_init, emit as ipfix_emit, flush as ipfix_flush } from './exporter_ipfix.uc';
 import { init as syslog_init, emit as syslog_emit } from './exporter_syslog.uc';
 

@@ -146,7 +146,7 @@ export function record_error()
 
 /* Set the gauges from one lifecycle pass. `n` carries { active, map, packets,
  * bytes }; `devs` is the list of currently attached netdev names. */
-export function state(n, devs)
+export function set_state(n, devs)
 {
 	if (!active)
 		return;
