@@ -16,6 +16,7 @@
 import { cursor } from 'uci';
 import { writefile, rename, error as fs_error } from 'fs';
 import { WARN } from 'log';
+import { parse_uint } from './util.uc';
 
 let active = false;
 let file = '';
@@ -41,11 +42,9 @@ function flow_key(k)
 export function init()
 {
 	let ctx = cursor();
-	file = ctx.get('obserwrt', 'main', 'prometheus_textfile') || '';
-	let iv = ctx.get('obserwrt', 'main', 'prometheus_interval');
 
-	if (iv !== null && match(iv, /^[0-9]+$/))
-		interval_s = int(iv);
+	file = ctx.get('obserwrt', 'main', 'prometheus_textfile') || '';
+	interval_s = parse_uint(ctx.get('obserwrt', 'main', 'prometheus_interval'), 20, 86400, 'prometheus_interval');
 
 	active = (file != '');
 	return active;

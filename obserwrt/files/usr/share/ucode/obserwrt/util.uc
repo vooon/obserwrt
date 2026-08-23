@@ -28,7 +28,7 @@ export function bool_option(value, fallback)
 /* Parse a non-negative integer option in [0, hi]. Missing/empty uses `def`; a
  * present but invalid value is a fatal configuration error. `label` is used in
  * error messages. */
-function parse_uint(value, def, hi, label)
+export function parse_uint(value, def, hi, label)
 {
 	let v;
 
