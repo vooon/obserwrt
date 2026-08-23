@@ -17,6 +17,7 @@ const PRIO = 10;      /* tc filter priority */
 
 let device_pats = [];
 let attached = {};          /* attached[name] = { ifindex } */
+let name_by_index = {};     /* ifindex -> current netdev name */
 
 function load_devices()
 {
@@ -80,6 +81,7 @@ function attach_device(name, ifindex)
 		WARN('egress attach %s: %s', name, e);
 
 	attached[name] = { ifindex: ifindex || ifindex_of(name) };
+	name_by_index[attached[name].ifindex] = name;
 	NOTE('attached %s (ifindex %d)', name, attached[name].ifindex);
 };
 
@@ -95,6 +97,7 @@ function detach_device(name)
 	purge_device(info.ifindex);
 
 	delete attached[name];
+	delete name_by_index[info.ifindex];
 	NOTE('detached %s (ifindex %d)', name, info.ifindex);
 };
 
@@ -109,6 +112,9 @@ export function snapshot(ubus)
 			let dev = status[name];
 			let ifindex = ifindex_of(name);
 
+			if (ifindex)
+				name_by_index[ifindex] = name;
+
 			if (glob_match(name) && dev.present && ifindex)
 				attach_device(name, ifindex);
 		}
@@ -116,6 +122,11 @@ export function snapshot(ubus)
 
 	if (length(device_pats) > 0 && length(attached) == 0)
 		INFO('no matching devices present yet');
+};
+
+export function ifname(ifindex)
+{
+	return name_by_index[ifindex] || sprintf('%d', ifindex);
 };
 
 /* netifd network.device notification handler. Runs outside the entry's

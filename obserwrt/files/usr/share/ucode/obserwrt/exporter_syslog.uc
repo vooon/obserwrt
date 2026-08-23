@@ -2,8 +2,8 @@
  * obserwrt - syslog flow exporter
  *
  * Sends normalized observations as RFC 5424-compatible syslog messages. An
- * empty destination uses the process-local OpenWrt syslog facility; a remote
- * destination uses one connected UDP socket for the lifetime of the agent.
+ * An empty syslog_host uses the process-local OpenWrt syslog facility; a remote
+ * syslog_host uses one connected UDP socket for the lifetime of the agent.
  */
 "use strict";
 
@@ -11,6 +11,7 @@ import * as socket from 'socket';
 import { cursor } from 'uci';
 import { ulog, WARN, LOG_INFO } from 'log';
 import { INGRESS } from './flow.uc';
+import { ifname } from './reconcile.uc';
 import { bool_option } from './util.uc';
 
 let active = false;
@@ -34,6 +35,7 @@ function flow_record(k, v, expired)
 {
 	return {
 		ifindex: k.ifindex,
+		ifname: ifname(k.ifindex),
 		direction: (k.direction == INGRESS) ? 'ingress' : 'egress',
 		family: k.family,
 		protocol: k.protocol,
@@ -97,24 +99,24 @@ export function init()
 		return false;
 	}
 
-	let destination = ctx.get('obserwrt', 'syslog', 'destination') || '';
-	if (!destination) {
+	let host = ctx.get('obserwrt', 'syslog', 'syslog_host') || '';
+	if (!host) {
 		local = true;
 		active = true;
 		return true;
 	}
 
-	let port = int(ctx.get('obserwrt', 'syslog', 'port') || '514');
+	let port = int(ctx.get('obserwrt', 'syslog', 'syslog_port') || '514');
 	try {
-		sock = socket.connect(destination, port, { socktype: socket.SOCK_DGRAM });
+		sock = socket.connect(host, port, { socktype: socket.SOCK_DGRAM });
 	}
 	catch (e) {
-		WARN('syslog: cannot connect %s:%d: %s', destination, port, e);
+		WARN('syslog: cannot connect %s:%d: %s', host, port, e);
 		return false;
 	}
 
 	if (!sock) {
-		WARN('syslog: cannot connect %s:%d: %s', destination, port, socket.error());
+		WARN('syslog: cannot connect %s:%d: %s', host, port, socket.error());
 		return false;
 	}
 

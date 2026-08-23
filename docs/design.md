@@ -304,21 +304,22 @@ The syslog exporter carries the normalized observation as JSON or logfmt. It is
 intended for development, troubleshooting, and generic log pipelines; it does
 not classify routes, services, or address scope.
 
-- Empty `destination` writes through the process-local OpenWrt syslog facility.
-- A non-empty `destination` is resolved once and sent over a connected UDP
+- Empty `syslog_host` writes through the process-local OpenWrt syslog facility.
+- A non-empty `syslog_host` is resolved once and sent over a connected UDP
   socket, default port **514**.
 - `protocol` is currently limited to `udp`; `tcp` is reserved for a future
   implementation.
 - Remote messages use RFC 5424-compatible framing with `obserwrt` as the
   application name.
-- The exporter retains the numeric kernel `ifindex`; it does not resolve
-  interface names or attach per-flow labels.
+- The exporter includes both the numeric kernel `ifindex` and the current
+  `ifname` for human readability; interface names are not used as identity.
 
 Example JSON payload:
 
 ```json
 {
   "ifindex": 17,
+  "ifname": "awg0",
   "direction": "egress",
   "family": 4,
   "protocol": 6,
@@ -362,8 +363,8 @@ config exporter 'ipfix'
 
 config exporter_syslog 'syslog'
     option enabled '0'
-    option destination ''       # empty = local syslog
-    option port '514'
+    option syslog_host ''       # empty = local syslog
+    option syslog_port '514'
     option protocol 'udp'
     option format 'json'        # json or logfmt
 ```

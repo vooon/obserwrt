@@ -3,7 +3,7 @@
   "exporter_syslog": {
     ".name": "syslog",
     "enabled": "yes",
-    "destination": "",
+    "syslog_host": "",
     "format": "json"
   }
 }
@@ -25,11 +25,11 @@ syslog.emit({
 }, true);
 
 let record = json(substr(global.MOCK_LOG[0], 6));
-printf("level=%s src=%s dst=%s expired=%d packets=%d\n",
-	substr(global.MOCK_LOG[0], 0, 5), record.src, record.dst,
+printf("level=%s ifname=%s src=%s dst=%s expired=%d packets=%d\n",
+	substr(global.MOCK_LOG[0], 0, 5), record.ifname, record.src, record.dst,
 	record.expired ? 1 : 0, record.packets);
 -- End --
 
 -- Expect stdout --
-level=ULOG src=192.0.2.10 dst=198.51.100.20 expired=1 packets=2
+level=ULOG ifname=30 src=192.0.2.10 dst=198.51.100.20 expired=1 packets=2
 -- End --
