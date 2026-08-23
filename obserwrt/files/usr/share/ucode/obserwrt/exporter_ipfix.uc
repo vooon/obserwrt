@@ -183,33 +183,46 @@ export function emit(k, v, expired)
 	}
 };
 
-/* Initialise the exporter from the ipfix UCI section. */
+/* Initialise the exporter from the exporter_ipfix UCI section. */
 export function init()
 {
-	let destination = null, port = null;
+	let host = null, port = '4739', source_addr = null;
 
 	try {
 		const ctx = cursor();
-		destination = ctx.get('obserwrt', 'ipfix', 'destination');
-		port = ctx.get('obserwrt', 'ipfix', 'port');
+		let enabled = ctx.get('obserwrt', 'ipfix', 'enabled');
+
+		if (enabled != '1')
+			return false;
+
+		host = ctx.get('obserwrt', 'ipfix', 'collector_host');
+		source_addr = ctx.get('obserwrt', 'ipfix', 'source_address');
+
+		let p = ctx.get('obserwrt', 'ipfix', 'collector_port');
+		if (p)
+			port = p;
 	}
 	catch (e) {
-		/* fall through */
+		return false;
 	}
 
-	if (!destination || !port) {
-		WARN('ipfix: no destination/port configured');
+	if (!host) {
+		WARN('ipfix: no collector_host configured');
 		return false;
 	}
 
 	offset_ms = time() * 1000 - mono_ms();
-	dest = destination + ':' + port;
+	dest = host + ':' + port;
 	sock = socket.create(socket.AF_INET, socket.SOCK_DGRAM, 0);
 
 	if (!sock) {
 		WARN('ipfix: socket create failed');
 		return false;
 	}
+
+	/* Optionally send from a specific local address (source_address). */
+	if (source_addr && !sock.bind(source_addr + ':0'))
+		WARN('ipfix: bind source %s failed (%s)', source_addr, socket.error());
 
 	send_templates();
 	return true;

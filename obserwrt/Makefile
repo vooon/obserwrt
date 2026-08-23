@@ -53,7 +53,7 @@ define Package/obserwrt/install
 		./files/usr/share/ucode/obserwrt/flow.uc \
 		./files/usr/share/ucode/obserwrt/reconcile.uc \
 		./files/usr/share/ucode/obserwrt/lifecycle.uc \
-		./files/usr/share/ucode/obserwrt/exporter.uc \
+		./files/usr/share/ucode/obserwrt/exporter_ipfix.uc \
 		$(1)/usr/share/ucode/obserwrt/
 	$(INSTALL_DATA) ./files/etc/config/obserwrt $(1)/etc/config/
 	$(INSTALL_BIN) ./files/etc/init.d/obserwrt $(1)/etc/init.d/

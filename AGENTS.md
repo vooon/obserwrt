@@ -65,7 +65,7 @@ obserwrt/                     # OpenWrt package (also a feed root)
 ├── files/usr/share/ucode/obserwrt/flow.uc        # BPF map access
 ├── files/usr/share/ucode/obserwrt/reconcile.uc   # device lifecycle + reporting
 ├── files/usr/share/ucode/obserwrt/lifecycle.uc   # flow expiry/export pass
-├── files/usr/share/ucode/obserwrt/exporter.uc   # IPFIX exporter
+├── files/usr/share/ucode/obserwrt/exporter_ipfix.uc   # IPFIX exporter
 └── src/obserwrt-bpf.c        # TC ingress/egress sections
 ```
 

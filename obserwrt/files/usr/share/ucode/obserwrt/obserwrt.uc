@@ -14,7 +14,7 @@ import { ulog_open, ulog, WARN, ERR, ULOG_SYSLOG, LOG_DAEMON, LOG_DEBUG } from '
 import { load_bpf } from './flow.uc';
 import { snapshot, on_device_event, export_flow } from './reconcile.uc';
 import { run as lifecycle_pass } from './lifecycle.uc';
-import { init as ipfix_init, emit as ipfix_emit, flush as ipfix_flush } from './exporter.uc';
+import { init as ipfix_init, emit as ipfix_emit, flush as ipfix_flush } from './exporter_ipfix.uc';
 
 const SNAP_S = 5;       /* counter snapshot interval (seconds) */
 const RECONCIL_S = 30;  /* slow safety device reconcile interval (seconds) */

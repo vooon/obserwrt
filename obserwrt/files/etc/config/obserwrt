@@ -1,14 +1,17 @@
+
+package obserwrt
+
 config obserwrt 'main'
 	# Observe these Linux netdevs (exact names or glob patterns).
 	# Empty by default: obserwrt attaches to nothing until configured.
-	#
-	# list device 'awg_*'
-	# list device 'tun_*'
+	list device 'awg*'
 
-# IPFIX exporter (opt-in). Uncomment to send flows to a collector via UDP 4739.
-# `destination` is an IP address (hostname resolution is a follow-up).
+# IPFIX exporter (opt-in). Enable with 'option enabled' and point at a
+# collector. `collector_host` is an IP address (hostname resolution is a
+# follow-up); `source_address` optionally pins the source IP.
 #
-# config exporter 'ipfix'
-# 	option type 'ipfix'
-# 	option destination '192.0.2.10'
-# 	option port '4739'
+# config exporter_ipfix 'ipfix'
+# 	option enabled '1'
+# 	option collector_host '192.0.2.10'
+# 	option collector_port '4739'
+# 	option source_address '198.51.100.1'
