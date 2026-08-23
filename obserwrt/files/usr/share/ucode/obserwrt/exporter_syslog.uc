@@ -23,11 +23,10 @@ let self_host = '';
 function key_ip(value, family)
 {
 	let offset = (family == 4) ? 12 : 0;
-	let count = (family == 4) ? 4 : 16;
 	let bytes = [];
 
-	for (let i = 0; i < count; i++)
-		push(bytes, ord(value, offset + i));
+	for (let i = offset; i < length(value); i++)
+		push(bytes, ord(value, i));
 
 	return arrtoip(bytes);
 };
