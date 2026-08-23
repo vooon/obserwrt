@@ -73,18 +73,7 @@ export function detach(name, direction, prio)
 	tc_detach(name, dir_str(direction), prio);
 };
 
-/* Forward-export declaration: parse_key is defined below (ucode has no
- * hoisting). `export function name;` keeps the export binding, unlike a plain
- * `function name;` which would shadow it and stop the module exporting it. */
-export function parse_key;
-
-/* Drop every flow map entry recorded for the given device incarnation. */
-export function purge_device(ifindex) {
-	flows().delete_all(
-		function (key) {
-			return parse_key(key).ifindex == ifindex;
-		});
-};
+/* --- wire-format parsing (the single struct owner) ------------------- */
 
 /* Precompiled formats (flow key = 46 B '<LBBBx16s16sHHBB', value = 40 B
  * '<QQQQH6x'; struct/type owner - see docs/design.md §5). */
@@ -122,4 +111,14 @@ export function parse_value(raw)
 		last_seen:  u[3],
 		tcp_flags:  u[4],
 	};
+};
+
+/* Drop every flow map entry recorded for the given device incarnation. Define
+ * after parse_key (declare-before-use): OpenWrt's shipped ucode lacks ucode's
+ * forward-declaration syntax, and a bare `function x;` would shadow the export. */
+export function purge_device(ifindex) {
+	flows().delete_all(
+		function (key) {
+			return parse_key(key).ifindex == ifindex;
+		});
 };
