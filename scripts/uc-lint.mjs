@@ -29,14 +29,21 @@ function err(file, msg) {
 	failed = 1;
 }
 
+function warn(file, msg) {
+	console.warn(`[uc-lint] ${file}: warning: ${msg}`);
+}
+
 for (const dir of dirs) {
 const syntaxCheck = dir.endsWith('obserwrt/files/usr/share/ucode/obserwrt');
 for (const file of readdirSync(dir).filter((f) => f.endsWith('.uc'))) {
 	const src = readFileSync(path.join(dir, file), 'utf8');
 
 	// 1) ESM syntax via node's parser (cat f | node --input-type=module --check)
+	// ucode's `function name;` / `export function name;` forward-declaration
+	// (ucode docs §4.2) is not valid ECMAScript, so strip those lines first.
+	const syntaxSrc = src.replace(/^(?:export\s+)?function\s+[A-Za-z_$][\w$]*\s*;\s*$/gm, '');
 	const r = spawnSync(process.execPath, ['--input-type=module', '--check'], {
-		input: src,
+		input: syntaxSrc,
 		encoding: 'utf8',
 	});
 	if (syntaxCheck && r.status !== 0)
@@ -90,6 +97,21 @@ for (const file of readdirSync(dir).filter((f) => f.endsWith('.uc'))) {
 				err(file, `'${id}' is a string and not []-indexable (line ${ln + 1}): "${line.trim()}"`);
 		}
 	});
+
+	// 2d) forward-declared exports: warn that the target (OpenWrt) ucode does not
+	//     support `export function name;`, and require a matching definition.
+	const defnOf = (name) =>
+		new RegExp(`export\\s+function\\s+${name}\\s*\\(`).test(src);
+	for (const m of src.matchAll(/^export\s+function\s+([A-Za-z_$][\w$]*)\s*;\s*$/gm)) {
+		warn(file, `forward-export declaration 'export function ${m[1]};' is not supported by the target (OpenWrt) ucode; prefer declare-before-use`);
+		if (!defnOf(m[1]))
+			err(file, `forward-declared export '${m[1]}' has no matching definition`);
+	}
+	// 2e) a plain `function name;` must not shadow a later `export function name`.
+	for (const m of src.matchAll(/^function\s+([A-Za-z_$][\w$]*)\s*;\s*$/gm)) {
+		if (new RegExp(`export\\s+function\\s+${m[1]}\\s*\\(`).test(src))
+			err(file, `plain forward declaration 'function ${m[1]};' would shadow the exported '${m[1]}'`);
+	}
 }
 }
 
