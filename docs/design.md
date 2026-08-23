@@ -377,6 +377,7 @@ obserwrt/
     ├── files/usr/share/ucode/obserwrt/obserwrt.uc  # procd entry
     ├── files/usr/share/ucode/obserwrt/flow.uc
     ├── files/usr/share/ucode/obserwrt/reconcile.uc
+    ├── files/usr/share/ucode/obserwrt/lifecycle.uc
     └── src/obserwrt-bpf.c
 ```
 

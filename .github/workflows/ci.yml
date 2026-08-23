@@ -67,6 +67,7 @@ jobs:
           for f in files:
               src = open(f).read()
               src = re.sub(r'^import .*$', '', src, flags=re.M)
+              src = re.sub(r'^export ', '', src, flags=re.M)  # modules -> programs
               out = '/tmp/obserwrt-syntax/' + os.path.basename(f)
               open(out, 'w').write(hdr + src)
               print('stubbed', f, '->', out)

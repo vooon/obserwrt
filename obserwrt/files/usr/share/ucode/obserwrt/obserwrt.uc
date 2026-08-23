@@ -6,9 +6,10 @@
  * events + an infrequent status snapshot, and periodic flow reporting.
  */
 import { connect } from 'ubus';
-import { ulog_open, WARN, ERR, ULOG_SYSLOG, LOG_DAEMON } from 'log';
+import { ulog_open, ulog, WARN, ERR, ULOG_SYSLOG, LOG_DAEMON, LOG_DEBUG } from 'log';
 import { load_bpf } from './flow.uc';
-import { snapshot, on_device_event, dump } from './reconcile.uc';
+import { snapshot, on_device_event, export_flow } from './reconcile.uc';
+import { run } from './lifecycle.uc';
 
 const SNAP_S = 5;       /* counter snapshot interval (seconds) */
 const RECONCIL_S = 30;  /* slow safety device reconcile interval (seconds) */
@@ -54,10 +55,12 @@ function main()
 
 		if (now - last >= SNAP_S) {
 			try {
-				dump();
+				let n = run(export_flow);
+				if (n.active == 0 && n.expired == 0)
+					ulog(LOG_DEBUG, 'snapshot: no counters observed yet');
 			}
 			catch (e) {
-				WARN('dump: %s', sprintf('%s', e));
+				WARN('lifecycle: %s', sprintf('%s', e));
 			}
 			last = now;
 		}

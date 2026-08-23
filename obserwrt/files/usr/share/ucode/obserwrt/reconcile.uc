@@ -8,9 +8,8 @@
 import { tc_detach, error as bpf_error } from 'bpf';
 import { cursor } from 'uci';
 import { readfile } from 'fs';
-import { INFO, NOTE, WARN, ulog, LOG_DEBUG } from 'log';
-import { ing, eg, flows, purge_device, KFMT, VFMT } from './flow.uc';
-import * as struct from 'struct';
+import { INFO, NOTE, WARN } from 'log';
+import { ing, eg, purge_device } from './flow.uc';
 
 const PRIO = 10;      /* tc filter priority */
 
@@ -150,19 +149,14 @@ export const rname = function(ifindex)
 	return name_by_index[ifindex] || sprintf('%d', ifindex);
 };
 
-/* Report the current flow map to the log (debug exporter for P0/P1). */
-export const dump = function()
+/* Emit a single flow to the exporter (debug output for now; later IPFIX).
+ * `k`/`v` are the unpacked key/value arrays; `expired` marks an inactive flow
+ * that lifecycle.uc is about to remove. */
+export const export_flow = function(k, v, expired)
 {
-	let n = 0;
-	flows().foreach(function (key) {
-		let k = struct.unpack(KFMT, key);
-		let v = struct.unpack(VFMT, flows().get(key));
-		let dir = (k[1] == 0) ? 'ingress' : 'egress';
+	let dir = (k[1] == 0) ? 'ingress' : 'egress';
 
-		INFO('flow ifindex=%d ifname=%s direction=%s family=%d proto=%d sport=%d dport=%d icmp=%d/%d tcp_flags=0x%x packets=%d bytes=%d',
-		     k[0], rname(k[0]), dir, k[2], k[3], k[6], k[7], k[8], k[9], v[4], v[0], v[1]);
-		n++;
-	});
-	if (n == 0)
-		ulog(LOG_DEBUG, 'snapshot: no counters observed yet');
+	INFO('flow ifindex=%d ifname=%s direction=%s family=%d proto=%d sport=%d dport=%d icmp=%d/%d tcp_flags=0x%x packets=%d bytes=%d%s',
+	     k[0], rname(k[0]), dir, k[2], k[3], k[6], k[7], k[8], k[9], v[4], v[0], v[1],
+	     expired ? ' [expired]' : '');
 };

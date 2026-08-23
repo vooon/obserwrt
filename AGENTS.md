@@ -64,14 +64,15 @@ obserwrt/                     # OpenWrt package (also a feed root)
 ├── files/usr/share/ucode/obserwrt/obserwrt.uc    # procd entry
 ├── files/usr/share/ucode/obserwrt/flow.uc        # BPF map access
 ├── files/usr/share/ucode/obserwrt/reconcile.uc   # device lifecycle + reporting
+├── files/usr/share/ucode/obserwrt/lifecycle.uc   # flow expiry/export pass
 └── src/obserwrt-bpf.c        # TC ingress/egress sections
 ```
 
 The `.uc` scripts are split into modules under `/usr/share/ucode/obserwrt/`
 (OpenWrt ucode convention — cf. `fw4.uc`, `cli/`, `node-exporter/`). The entry
-`obserwrt.uc` imports `flow.uc` and `reconcile.uc`. ucode `.uc` modules use
-`export const foo = function(){...}` (not `export function foo(){}`, which this
-target's ucode rejects) and `import { foo } from './flow.uc'`.
+`obserwrt.uc` imports `flow.uc`, `reconcile.uc` and `lifecycle.uc`. ucode `.uc`
+modules use `export const foo = function(){...}` (not `export function foo(){}`,
+which this target's ucode rejects) and `import { foo } from './flow.uc'`.
 
 The repo is used directly as an OpenWrt package feed; package sources under the
 top-level `obserwrt/` package dir (all other top-level dirs, `.github`, `docs`,
