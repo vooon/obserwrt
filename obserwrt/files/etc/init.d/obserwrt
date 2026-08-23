@@ -13,6 +13,20 @@ start_service()
 		/usr/share/ucode/obserwrt/obserwrt.uc
 	procd_set_param env BPF_OBJ=/lib/bpf/obserwrt-bpf.o
 	procd_set_param respawn 3600 5 5
-	procd_set_param file /etc/config/obserwrt
 	procd_close_instance
+}
+
+# Reload on /etc/config/obserwrt changes (procd_add_reload_trigger + default
+# reload re-emit the instance config, which does NOT restart the process - and
+# obserwrt only reads its config at startup - so explicit stop+start is what
+# actually applies changes).
+reload_service()
+{
+	stop
+	start
+}
+
+service_triggers()
+{
+	procd_add_reload_trigger "obserwrt"
 }
