@@ -50,7 +50,7 @@ ucode
 normalized observation
   │
   ├── IPFIX exporter
-  ├── debug exporter
+  ├── syslog exporter
   └── future exporters
 ```
 
@@ -254,7 +254,7 @@ Exporters consume normalized observations:
 ```text
 emit(flow)
    ├── ipfix.emit(flow)
-   └── debug.emit(flow)
+   └── syslog.emit(flow)
 ```
 
 Additional exporters require no eBPF data-model changes. Dynamic plugin loading
@@ -298,18 +298,27 @@ ingressInterface
 egressInterface
 ```
 
-### 8.2 Debug exporter
+### 8.2 Syslog exporter
 
-Human-readable stdout JSON for development and troubleshooting, e.g.:
+The syslog exporter carries the normalized observation as JSON or logfmt. It is
+intended for development, troubleshooting, and generic log pipelines; it does
+not classify routes, services, or address scope.
 
-For human readability the debug exporter also resolves the kernel ifIndex to the
-current interface name (`ifname`). The IPFIX exporter keeps only the numeric
-`ifindex`; interface names are never exported.
+- Empty `destination` writes through the process-local OpenWrt syslog facility.
+- A non-empty `destination` is resolved once and sent over a connected UDP
+  socket, default port **514**.
+- `protocol` is currently limited to `udp`; `tcp` is reserved for a future
+  implementation.
+- Remote messages use RFC 5424-compatible framing with `obserwrt` as the
+  application name.
+- The exporter retains the numeric kernel `ifindex`; it does not resolve
+  interface names or attach per-flow labels.
+
+Example JSON payload:
 
 ```json
 {
   "ifindex": 17,
-  "ifname": "awg0",
   "direction": "egress",
   "family": 4,
   "protocol": 6,
@@ -319,8 +328,9 @@ current interface name (`ifname`). The IPFIX exporter keeps only the numeric
   "dport": 443,
   "packets": 42,
   "bytes": 31981,
-  "first_seen": 123456789,
-  "last_seen": 123456999
+  "first_seen_ns": 123456789,
+  "last_seen_ns": 123456999,
+  "expired": false
 }
 ```
 
@@ -349,6 +359,13 @@ config exporter 'ipfix'
     option type 'ipfix'
     option destination 'collector.example.net'   # IP address or hostname
     option port '4739'
+
+config exporter_syslog 'syslog'
+    option enabled '0'
+    option destination ''       # empty = local syslog
+    option port '514'
+    option protocol 'udp'
+    option format 'json'        # json or logfmt
 ```
 
 `device` entries are exact Linux netdev names or simple glob patterns. Both
@@ -413,7 +430,7 @@ exporter.
 - **P2 — Dynamic devices:** start with devices absent, then `ifup/ifdown/ifup`;
   verify daemon stays alive, attach auto-appears, deletion is harmless, new
   ifIndex used, other devices unaffected.
-- **P3 — Debug export:** validate normalized observations independent of IPFIX.
+- **P3 — Syslog export:** validate normalized observations independent of IPFIX.
 - **P4 — IPFIX:** capture with tcpdump/Wireshark; verify templates, data records,
   sequence behavior, IPv4/IPv6, interface IDs, timestamps, counters.
 - **P5 — Akvorado:** flows accepted; src/dst correct; ingress/egress interface
@@ -438,7 +455,7 @@ richer observations than standard IPFIX.
 ## 16. Release criteria (v0.1)
 
 An OpenWrt user can: add the repo as a feed; build/install the package;
-configure a device list + IPFIX collector; start with absent devices; create/
+configure a device list + IPFIX/syslog collector; start with absent devices; create/
 delete selected interfaces without restart; observe IPv4/IPv6 TCP/UDP/ICMP on
 TC ingress/egress; export valid IPFIX with real kernel ifIndex; inspect the same
-observations via the debug mechanism; consume the flows in Akvorado.
+observations via syslog; consume the flows in Akvorado.

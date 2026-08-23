@@ -17,7 +17,6 @@ const PRIO = 10;      /* tc filter priority */
 
 let device_pats = [];
 let attached = {};          /* attached[name] = { ifindex } */
-let name_by_index = {};     /* ifindex -> netdev name (debug output) */
 
 function load_devices()
 {
@@ -110,9 +109,6 @@ export function snapshot(ubus)
 			let dev = status[name];
 			let ifindex = ifindex_of(name);
 
-			if (ifindex)
-				name_by_index[ifindex] = name;
-
 			if (glob_match(name) && dev.present && ifindex)
 				attach_device(name, ifindex);
 		}
@@ -149,24 +145,4 @@ export function on_device_event(ev)
 	catch (e) {
 		WARN('device event error: %s', e);
 	}
-};
-
-/* Resolve an ifindex to a netdev name for human-readable output. */
-export function rname(ifindex)
-{
-	return name_by_index[ifindex] || sprintf('%d', ifindex);
-};
-
-/* Emit a single flow to the exporter (debug output for now; later IPFIX).
- * `k`/`v` are parsed key/value objects (see flow.uc); `expired` marks an
- * inactive flow that lifecycle.uc is about to remove. */
-export function export_flow(k, v, expired)
-{
-	let dir = (k.direction == INGRESS) ? 'ingress' : 'egress';
-
-	INFO('flow ifindex=%d ifname=%s direction=%s family=%d proto=%d sport=%d dport=%d icmp=%d/%d tcp_flags=0x%x packets=%d bytes=%d%s',
-	     k.ifindex, rname(k.ifindex), dir, k.family, k.protocol,
-	     k.sport, k.dport, k.icmp_type, k.icmp_code,
-	     v.tcp_flags, v.packets, v.bytes,
-	     expired ? ' [expired]' : '');
 };

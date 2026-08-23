@@ -32,6 +32,15 @@ function create(family, type, proto) {
 	};
 }
 
+function connect(host, port, hints) {
+	return {
+		send: (data) => {
+			push(global.MOCK_SENT, { host, port, data });
+			return length(data);
+		},
+	};
+}
+
 export const AF_INET = 2;
 export const SOCK_DGRAM = 2;
-export { error, create };
+export { error, create, connect };

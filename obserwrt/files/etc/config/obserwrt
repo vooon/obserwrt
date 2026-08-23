@@ -13,3 +13,11 @@ config exporter_ipfix 'ipfix'
 	option collector_port '4739'
 	# option source_address ''
 
+# Syslog exporter (opt-in). Empty destination uses local syslog; a non-empty
+# destination is resolved once and used as a remote UDP syslog endpoint.
+config exporter_syslog 'syslog'
+	option enabled '0'
+	option destination ''
+	option port '514'
+	option protocol 'udp'
+	option format 'json'

@@ -34,7 +34,7 @@ endef
 define Package/obserwrt/description
   Lightweight eBPF network observability for OpenWrt. Observes traffic on
   selected Linux netdevs via TC ingress/egress, tracks flows, and exports them
-  to IPFIX (Akvorado) and a debug exporter. See docs/design.md.
+  to IPFIX (Akvorado) and a syslog exporter. See docs/design.md.
 endef
 
 define Package/obserwrt/conffiles
@@ -54,6 +54,7 @@ define Package/obserwrt/install
 		./files/usr/share/ucode/obserwrt/reconcile.uc \
 		./files/usr/share/ucode/obserwrt/lifecycle.uc \
 		./files/usr/share/ucode/obserwrt/exporter_ipfix.uc \
+		./files/usr/share/ucode/obserwrt/exporter_syslog.uc \
 		$(1)/usr/share/ucode/obserwrt/
 	$(INSTALL_DATA) ./files/etc/config/obserwrt $(1)/etc/config/
 	$(INSTALL_BIN) ./files/etc/init.d/obserwrt $(1)/etc/init.d/

@@ -1,0 +1,38 @@
+-- File uci/obserwrt.json --
+{
+  "exporter_syslog": {
+    ".name": "syslog",
+    "enabled": "1",
+    "destination": "192.0.2.10",
+    "port": "5514",
+    "protocol": "udp",
+    "format": "logfmt"
+  }
+}
+-- End --
+
+-- Testcase --
+import * as syslog from 'exporter_syslog';
+
+if (!syslog.init())
+	die('init failed');
+
+syslog.emit({
+	ifindex: 30, direction: 0, family: 6, protocol: 17,
+	src: '\x20\x01\x0d\xb8\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01',
+	dst: '\x20\x01\x0d\xb8\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02',
+	sport: 53, dport: 443, icmp_type: 0, icmp_code: 0,
+}, {
+	packets: 1, bytes: 64, first_seen: 30, last_seen: 40, tcp_flags: 0,
+}, false);
+
+let msg = global.MOCK_SENT[0].data;
+printf("host=%s port=%d header=%s has_src=%d has_expired=%d\n",
+	global.MOCK_SENT[0].host, global.MOCK_SENT[0].port,
+	substr(msg, 0, 24), index(msg, 'src="2001:db8::1"') != -1,
+	index(msg, 'expired=0') != -1);
+-- End --
+
+-- Expect stdout --
+host=192.0.2.10 port=5514 header=<134>1 - obserwrt - - -  has_src=1 has_expired=1
+-- End --

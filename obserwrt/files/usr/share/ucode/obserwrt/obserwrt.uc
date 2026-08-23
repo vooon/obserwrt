@@ -12,21 +12,24 @@ import { connect } from 'ubus';
 import { init as uloop_init, run as uloop_run, interval } from 'uloop';
 import { ulog_open, ulog, WARN, ERR, ULOG_SYSLOG, LOG_DAEMON, LOG_DEBUG } from 'log';
 import { load_bpf } from './flow.uc';
-import { snapshot, on_device_event, export_flow } from './reconcile.uc';
+import { snapshot, on_device_event } from './reconcile.uc';
 import { run as lifecycle_pass } from './lifecycle.uc';
 import { init as ipfix_init, emit as ipfix_emit, flush as ipfix_flush } from './exporter_ipfix.uc';
+import { init as syslog_init, emit as syslog_emit } from './exporter_syslog.uc';
 
 const SNAP_S = 5;       /* counter snapshot interval (seconds) */
 const RECONCIL_S = 30;  /* slow safety device reconcile interval (seconds) */
 
 let ipfix_active = false;
+let syslog_active = false;
 
 ulog_open(ULOG_SYSLOG, LOG_DAEMON, "obserwrt");
 
-/* Dispatches one flow to all exporters (debug log + IPFIX). */
+/* Dispatches one normalized observation to all configured exporters. */
 function emit_flow(k, v, expired)
 {
-	export_flow(k, v, expired);
+	if (syslog_active)
+		syslog_emit(k, v, expired);
 
 	if (ipfix_active)
 		ipfix_emit(k, v, expired);
@@ -39,6 +42,7 @@ function main()
 	load_bpf();
 
 	ipfix_active = ipfix_init();
+	syslog_active = syslog_init();
 
 	let ubus = connect();
 	if (!ubus)

@@ -19,9 +19,10 @@ function ERR(...args)   { record('ERR', ...args); }
 function NOTE(...args)  { return null; }
 
 function ulog_open() { return null; }
-function ulog()      { return null; }
+function ulog(...args) { record('ULOG', ...args); }
 
 export const ULOG_SYSLOG = 0;
 export const LOG_DAEMON  = 0;
 export const LOG_DEBUG   = 0;
+export const LOG_INFO    = 0;
 export { INFO, WARN, ERR, NOTE, ulog_open, ulog };

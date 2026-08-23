@@ -7,7 +7,7 @@ Guidance for AI coding agents working in this repository.
 `obserwrt` — lightweight eBPF network observability for OpenWrt, built on ucode
 and `ucode-mod-bpf`. It observes traffic on selected Linux netdevs via TC
 ingress/egress, tracks flows in a BPF hash map, and exports normalized
-observations to IPFIX (Akvorado) and a debug exporter.
+observations to IPFIX (Akvorado) and a syslog exporter.
 
 Authoritative design: [`docs/design.md`](docs/design.md). Read it before making
 architectural changes. Do not let the implementation drift from it.
