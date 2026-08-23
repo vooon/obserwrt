@@ -340,21 +340,27 @@ Example JSON payload:
 
 ## 9. Self-observability
 
-Individual flows are **never** placed into Prometheus labels; only aggregates are
-exposed: `obserwrt_packets_total`, `obserwrt_bytes_total`,
-`obserwrt_flows_exported_total`, `obserwrt_export_errors_total`
-(counters) and `obserwrt_flows_active`, `obserwrt_bpf_map_entries`,
-`obserwrt_devices_attached` (gauges).
+Individual flows are **never** placed into Prometheus labels. Exposed metrics:
+
+- counters: `obserwrt_flows_exported_total`, `obserwrt_export_errors_total`
+- gauges: `obserwrt_packets`, `obserwrt_bytes` (sum across tracked flows this
+  pass), `obserwrt_flows_active`, `obserwrt_bpf_map_entries`,
+  `obserwrt_bpf_map_limit`, `obserwrt_devices_attached`, and per-netdev
+  `obserwrt_device_attached{ifname="..."}` so operators can see **which**
+  interfaces are observed, not just how many.
 
 Metrics are published via the **Prometheus textfile collector**: `metrics.uc`
 writes a `.prom` file atomically (temp file + rename, all-or-nothing) that a
 node-exporter instance scrapes. obserwrt does **not** implement an HTTP server.
-The feature is enabled by setting `main.prometheus_textfile` to a writable path
-(e.g. `/run/prometheus/textfile/obserwrt.prom`); `main.prometheus_interval`
+Formatting (labels, escaping, govalue, decl) is adapted from node-exporter's
+ucode metrics abstraction. The feature is enabled by setting
+`main.prometheus_textfile` to a writable path; `main.prometheus_interval`
 (default 20s) is the cadence of a dedicated uloop timer that rewrites the file,
-independent of the 5s lifecycle flush (counters accumulate on every pass).
-`packets`/`bytes` are cumulative totals built from per-flow deltas, so a
-long-lived flow is counted exactly once.
+independent of the 5s lifecycle flush.
+
+The flow map is an **LRU hash**, so at capacity it evicts rather than failing;
+saturation is visible as `obserwrt_bpf_map_entries` approaching
+`obserwrt_bpf_map_limit`.
 
 ## 10. Configuration (UCI)
 

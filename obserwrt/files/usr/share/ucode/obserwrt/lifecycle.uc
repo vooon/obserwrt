@@ -50,13 +50,14 @@ function now_ns()
 };
 
 /* One lifecycle pass. `exporter(k, v, expired)` receives the parsed flow key
- * and value objects. Returns { active, expired, map } - `active`/`expired` are
- * flow counts, `map` is the number of entries walked this pass. Flows idle
- * longer than inactive_s are exported as expired and deleted from the map. */
+ * and value objects. Returns { active, expired, map, packets, bytes } - flow
+ * counts plus the sum of packets/bytes across the tracked flows, for
+ * self-observability gauges. Flows idle longer than inactive_s are exported as
+ * expired and deleted from the map. */
 export function run(exporter)
 {
 	let now = now_ns();
-	let n = { active: 0, expired: 0, map: 0 };
+	let n = { active: 0, expired: 0, map: 0, packets: 0, bytes: 0 };
 
 	flows().foreach(function (key) {
 		let k = parse_key(key);
@@ -64,6 +65,9 @@ export function run(exporter)
 		let age_s = (now - v.last_seen) / 1000000000.0;
 
 		n.map++;
+		n.packets += v.packets;
+		n.bytes += v.bytes;
+
 		if (age_s > inactive_s) {
 			exporter(k, v, true);
 			flows().delete(key);

@@ -1,15 +1,21 @@
 /*
  * obserwrt - Prometheus self-observability (metrics.uc)
  *
- * Publishes aggregate counters/gauges via the node-exporter textfile collector
- * (no HTTP server, no per-flow labels). Enabled only when the `main` UCI option
- * `prometheus_textfile` is set to the output path (e.g.
- * /run/prometheus/textfile/obserwrt.prom). The file is rewritten atomically
- * (temp + rename) on each export cycle.
+ * Publishes aggregate gauges/counters via the node-exporter textfile collector
+ * (no HTTP server; labels are per-device, never per-flow). Enabled only when the
+ * `main` UCI option `prometheus_textfile` is set to the output path. The file
+ * is rewritten atomically (temp + rename) by a dedicated uloop timer at
+ * `interval()` seconds.
  *
- * `packets`/`bytes` are cumulative counters accumulated from per-flow deltas,
- * so a long-lived flow is counted exactly once even though it is re-exported
- * every pass.
+ * The metric formatting below (counter()/gauge(), label escaping, govalue,
+ * decl-gating) is adapted from OpenWrt's prometheus-node-exporter-ucode
+ * (metrics.uc), licensed Apache-2.0; attribution is retained per that license.
+ * The original emits over HTTP (uhttpd.send); here `puts` accumulates into a
+ * string that is written to the textfile collector instead.
+ *
+ * The flow map is an LRU hash, so at capacity it evicts rather than failing;
+ * saturation is surfaced as (current entries, capacity) so utilization can be
+ * watched/alarmed on.
  */
 "use strict";
 
@@ -18,31 +24,105 @@ import { writefile, rename, error as fs_error } from 'fs';
 import { WARN } from 'log';
 import { parse_uint } from './util.uc';
 
+/* Must match obserwrt_flows max_entries in bpf.c */
+const BPF_MAP_LIMIT = 4096;
+
 let active = false;
 let file = '';
-let interval_s = 20;         /* seconds between file writes (dedicated timer) */
-let total_packets = 0;
-let total_bytes = 0;
+let interval_s = 20;
+let out = '';            /* accumulator for the current textfile snapshot */
 let total_flows = 0;
 let total_errors = 0;
 let flows_active = 0;
 let map_entries = 0;
-let devices = 0;
-let seen = {};           /* flow-key fingerprint -> { p, b } for deltas */
+let packets = 0;
+let bytes = 0;
+let devices = [];
 
-function flow_key(k)
-{
-	return sprintf('%d|%d|%d|%d|%d|%s|%s|%d|%d',
-		k.ifindex, k.direction, k.family, k.protocol, k.icmp_type,
-		hexenc(k.src), hexenc(k.dst), k.sport, k.dport);
-};
+/* ---- node-exporter metric formatting (adapted) ---------------------- */
+
+function debug(...s) { /* unused in textfile mode */ }
+
+function puts(...s) { out += join('', s) + '\n'; }
+
+function govalue(value) {
+	if (value == Infinity)
+		return "+Inf";
+	else if (value == -Infinity)
+		return "-Inf";
+	else if (value != value)
+		return "NaN";
+	else if (type(value) in [ "int", "double" ])
+		return value;
+	else if (type(value) in [ "bool", "string" ])
+		return +value;
+
+	return null;
+}
+
+function metric(name, mtype, help, skipdecl) {
+	let func;
+	let decl = skipdecl == true ? false : true;
+
+	let yld = function(labels, value) {
+		let v = govalue(value);
+
+		if (v == null) {
+			debug(`skipping metric: unsupported value '${value}' (${name})`);
+			return func;
+		}
+
+		let labels_str = "";
+		if (length(labels)) {
+			let sep = "";
+			let s;
+			labels_str = "{";
+			for (let l in labels) {
+				if (labels[l] == null)
+					s = "";
+				else if (type(labels[l]) == "string") {
+					s = replace(labels[l], "\\", "\\\\");
+					s = replace(s, "\"", "\\\"");
+					s = replace(s, "\n", "\\n");
+				} else {
+					s = govalue(labels[l]);
+
+					if (!s)
+						continue;
+				}
+
+				labels_str += sep + l + "=\"" + s + "\"";
+				sep = ",";
+			}
+			labels_str += "}";
+		}
+
+		if (decl) {
+			if (help)
+				puts("# HELP ", name, " ", help);
+			puts("# TYPE ", name, " ", mtype);
+			decl = false;
+		}
+
+		puts(name, labels_str, " ", v);
+		return func;
+	};
+
+	func = yld;
+	return func;
+}
+
+function counter(name, help, skipdecl) { return metric(name, "counter", help, skipdecl); }
+
+function gauge(name, help, skipdecl) { return metric(name, "gauge", help, skipdecl); }
+
+/* ---- config --------------------------------------------------------- */
 
 /* Read the output path and write interval from the `main` section. Returns true
  * when enabled. */
 export function init()
 {
 	let ctx = cursor();
-
 	file = ctx.get('obserwrt', 'main', 'prometheus_textfile') || '';
 	interval_s = parse_uint(ctx.get('obserwrt', 'main', 'prometheus_interval'), 20, 86400, 'prometheus_interval');
 
@@ -50,37 +130,12 @@ export function init()
 	return active;
 };
 
-/* Write cadence in seconds, for the caller to schedule a uloop interval. */
-export function interval()
-{
-	return interval_s;
-};
-
-/* Include one exported flow in the aggregate totals. */
+/* Records one dispatched flow (cheap dispatch counter; per-flow args are
+ * retained only for call-site symmetry). */
 export function observe(k, v, expired)
 {
-	if (!active)
-		return;
-
-	let fk = flow_key(k);
-	let prev = seen[fk];
-	let dp = v.packets, db = v.bytes;
-
-	if (prev !== null) {
-		dp -= prev.p;
-		db -= prev.b;
-	}
-
-	if (dp > 0)
-		total_packets += dp;
-	if (db > 0)
-		total_bytes += db;
-
-	seen[fk] = { p: v.packets, b: v.bytes };
-	if (expired)
-		delete seen[fk];
-
-	total_flows++;
+	if (active)
+		total_flows++;
 };
 
 export function record_error()
@@ -89,51 +144,57 @@ export function record_error()
 		total_errors++;
 };
 
-export function set_gauges(active_flows, map, n_devices)
+/* Set the gauges from one lifecycle pass. `n` carries { active, map, packets,
+ * bytes }; `devs` is the list of currently attached netdev names. */
+export function state(n, devs)
 {
 	if (!active)
 		return;
 
-	flows_active = active_flows;
-	map_entries = map;
-	devices = n_devices;
+	flows_active = n.active;
+	map_entries = n.map;
+	packets = n.packets;
+	bytes = n.bytes;
+
+	devices = [];
+	for (let d in devs)
+		push(devices, d);
+};
+
+/* Write cadence in seconds, for the caller to schedule a uloop interval. */
+export function interval()
+{
+	return interval_s;
 };
 
 /* Write the textfile-collector snapshot atomically. Called from a dedicated
- * uloop timer at `interval()` seconds. A missing/unwritable target (e.g. the
- * textfile dir not yet created) is not fatal: it logs a warning and is retried
- * on the next timer tick, so a later directory creation takes effect. */
+ * uloop timer at `interval()` seconds. A missing/unwritable target is not
+ * fatal: it logs a warning and is retried on the next tick, so a later
+ * directory creation takes effect. */
 export function write()
 {
 	if (!active)
 		return;
 
-	let body =
-		'# HELP obserwrt_packets_total Observed packets (cumulative).\n' +
-		'# TYPE obserwrt_packets_total counter\n' +
-		sprintf('obserwrt_packets_total %d\n', total_packets) +
-		'# HELP obserwrt_bytes_total Observed bytes (cumulative).\n' +
-		'# TYPE obserwrt_bytes_total counter\n' +
-		sprintf('obserwrt_bytes_total %d\n', total_bytes) +
-		'# HELP obserwrt_flows_exported_total Flow records dispatched to exporters.\n' +
-		'# TYPE obserwrt_flows_exported_total counter\n' +
-		sprintf('obserwrt_flows_exported_total %d\n', total_flows) +
-		'# HELP obserwrt_export_errors_total Export/lifecycle failures.\n' +
-		'# TYPE obserwrt_export_errors_total counter\n' +
-		sprintf('obserwrt_export_errors_total %d\n', total_errors) +
-		'# HELP obserwrt_flows_active Currently live flows.\n' +
-		'# TYPE obserwrt_flows_active gauge\n' +
-		sprintf('obserwrt_flows_active %d\n', flows_active) +
-		'# HELP obserwrt_bpf_map_entries Flow map entry count.\n' +
-		'# TYPE obserwrt_bpf_map_entries gauge\n' +
-		sprintf('obserwrt_bpf_map_entries %d\n', map_entries) +
-		'# HELP obserwrt_devices_attached Number of attached netdevs.\n' +
-		'# TYPE obserwrt_devices_attached gauge\n' +
-		sprintf('obserwrt_devices_attached %d\n', devices);
+	out = '';
+
+	counter('obserwrt_flows_exported_total', 'Flow records dispatched to exporters.')({}, total_flows);
+	counter('obserwrt_export_errors_total', 'Export/lifecycle failures.')({}, total_errors);
+	gauge('obserwrt_packets', 'Packets across tracked flows.')({}, packets);
+	gauge('obserwrt_bytes', 'Bytes across tracked flows.')({}, bytes);
+	gauge('obserwrt_flows_active', 'Currently live flows.')({}, flows_active);
+	gauge('obserwrt_bpf_map_entries', 'Current flow map entries.')({}, map_entries);
+	gauge('obserwrt_bpf_map_limit', 'Flow map capacity (LRU).')({}, BPF_MAP_LIMIT);
+	gauge('obserwrt_devices_attached', 'Number of attached netdevs.')({}, length(devices));
+
+	let dev = gauge('obserwrt_device_attached', 'Attached netdev (1 if attached).');
+
+	for (let d in devices)
+		dev({ ifname: d }, 1);
 
 	let tmp = file + '.tmp';
 
-	if (writefile(tmp, body) === null) {
+	if (writefile(tmp, out) === null) {
 		WARN('metrics: cannot write %s: %s', file, fs_error());
 		return;
 	}

@@ -20,40 +20,36 @@ unlink(PATH + '.tmp');
 if (!metrics.init())
 	die('metrics not enabled');
 
-function v4(src, dst, sport, dport) {
-	return { ifindex: 29, direction: 1, family: 4, protocol: 6, icmp_type: 0, icmp_code: 0, src, dst, sport, dport };
-}
+/* dispatch counting (per-flow args are unused now) */
+metrics.observe(null, null, false);
+metrics.observe(null, null, false);
+metrics.observe(null, null, false);
+metrics.observe(null, null, false);
 
-let a = v4(chr(0,0,0,0,0,0,0,0,0,0,255,255,192,0,2,1), chr(0,0,0,0,0,0,0,0,0,0,255,255,198,51,100,2), 12345, 80);
-let b = v4(chr(0,0,0,0,0,0,0,0,0,0,255,255,192,0,2,1), chr(0,0,0,0,0,0,0,0,0,0,255,255,198,51,100,2), 12346, 80);
-let c = { ifindex: 30, direction: 0, family: 6, protocol: 17, icmp_type: 0, icmp_code: 0,
-	src: chr(0x20,1,0x0d,0xb8,0,0,0,0,0,0,0,0,0,0,0,1),
-	dst: chr(0x20,1,0x0d,0xb8,0,0,0,0,0,0,0,0,0,0,0,2), sport: 53, dport: 443 };
-
-metrics.observe(a, { packets: 5, bytes: 500 }, false);
-metrics.observe(a, { packets: 10, bytes: 1000 }, false);   /* delta 5 / 500 */
-metrics.observe(b, { packets: 4, bytes: 400 }, true);
-metrics.observe(c, { packets: 2, bytes: 64 }, false);
-metrics.set_gauges(2, 3, 4);
 metrics.record_error();
+
+metrics.state({ active: 2, map: 3, packets: 16, bytes: 1464 }, [ 'awg_sp_pa', 'awg_sp_ka' ]);
 
 metrics.write();
 
 let d = readfile(PATH);
 function has(s) { return index(d, s) != -1; }
 
-printf("packets=%d bytes=%d flows=%d errors=%d active=%d map=%d dev=%d\n",
-	has('obserwrt_packets_total 16'),
-	has('obserwrt_bytes_total 1464'),
+printf("flows=%d errors=%d packets=%d bytes=%d live=%d map=%d limit=%d devcount=%d devpa=%d devka=%d\n",
 	has('obserwrt_flows_exported_total 4'),
 	has('obserwrt_export_errors_total 1'),
+	has('obserwrt_packets 16'),
+	has('obserwrt_bytes 1464'),
 	has('obserwrt_flows_active 2'),
 	has('obserwrt_bpf_map_entries 3'),
-	has('obserwrt_devices_attached 4'));
+	has('obserwrt_bpf_map_limit 4096'),
+	has('obserwrt_devices_attached 2'),
+	has('obserwrt_device_attached{ifname="awg_sp_pa"} 1'),
+	has('obserwrt_device_attached{ifname="awg_sp_ka"} 1'));
 
 unlink(PATH);
 -- End --
 
 -- Expect stdout --
-packets=1 bytes=1 flows=1 errors=1 active=1 map=1 dev=1
+flows=1 errors=1 packets=1 bytes=1 live=1 map=1 limit=1 devcount=1 devpa=1 devka=1
 -- End --

@@ -12,9 +12,9 @@ import { connect } from 'ubus';
 import { init as uloop_init, run as uloop_run, interval } from 'uloop';
 import { ulog_open, ulog, WARN, ERR, ULOG_SYSLOG, LOG_DAEMON, LOG_DEBUG } from 'log';
 import { load_bpf } from './flow.uc';
-import { snapshot, on_device_event, attached_count } from './reconcile.uc';
+import { snapshot, on_device_event, attached_names } from './reconcile.uc';
 import { run as lifecycle_pass } from './lifecycle.uc';
-import { init as metrics_init, observe as metrics_observe, record_error as metrics_error, set_gauges as metrics_gauges, write as metrics_write, interval as metrics_interval } from './metrics.uc';
+import { init as metrics_init, observe as metrics_observe, record_error as metrics_error, state as metrics_state, write as metrics_write, interval as metrics_interval } from './metrics.uc';
 import { init as ipfix_init, emit as ipfix_emit, flush as ipfix_flush } from './exporter_ipfix.uc';
 import { init as syslog_init, emit as syslog_emit } from './exporter_syslog.uc';
 
@@ -98,7 +98,7 @@ function main()
 				ulog(LOG_DEBUG, 'snapshot: no counters observed yet');
 			if (ipfix_active)
 				ipfix_flush();
-			metrics_gauges(n.active, n.map, attached_count());
+			metrics_state(n, attached_names());
 		}
 		catch (e) {
 			metrics_error();
