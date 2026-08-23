@@ -22,7 +22,7 @@ const ACTIVE_S   = 60;   /* active timeout: long-lived flows are re-exported
 export const timeouts = { inactive: INACTIVE_S, active: ACTIVE_S };
 
 /* monotonic "now" in nanoseconds - same clock as bpf_ktime_get_ns() */
-const now_ns = function()
+function now_ns()
 {
 	let c = clock(true);
 

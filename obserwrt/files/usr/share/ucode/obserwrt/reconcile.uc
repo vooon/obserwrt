@@ -19,7 +19,7 @@ let device_pats = [];
 let attached = {};          /* attached[name] = { ifindex } */
 let name_by_index = {};     /* ifindex -> netdev name (debug output) */
 
-const load_devices = function()
+function load_devices()
 {
 	let pats = [];
 	try {
@@ -44,7 +44,7 @@ const load_devices = function()
 device_pats = load_devices();
 
 /* matches a netdev name against the configured patterns (fnmatch wildcard) */
-const glob_match = function(name)
+function glob_match(name)
 {
 	for (let i = 0; i < length(device_pats); i++) {
 		if (wildcard(name, device_pats[i]))
@@ -55,14 +55,14 @@ const glob_match = function(name)
 
 /* Real kernel ifIndex via sysfs; netifd's network.device status does not
  * expose it. Returns 0 if the netdev is absent. */
-const ifindex_of = function(name)
+function ifindex_of(name)
 {
 	let v = readfile('/sys/class/net/' + name + '/ifindex');
 
 	return (v === null) ? 0 : int(v);
 };
 
-const attach_device = function(name, ifindex)
+function attach_device(name, ifindex)
 {
 	if (attached[name]) {
 		if (ifindex)
@@ -81,7 +81,7 @@ const attach_device = function(name, ifindex)
 	NOTE('attached %s (ifindex %d)', name, attached[name].ifindex);
 };
 
-const detach_device = function(name, ifindex)
+function detach_device(name, ifindex)
 {
 	if (!attached[name])
 		return;
