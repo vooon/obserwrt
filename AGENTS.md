@@ -71,8 +71,8 @@ obserwrt/                     # OpenWrt package (also a feed root)
 The `.uc` scripts are split into modules under `/usr/share/ucode/obserwrt/`
 (OpenWrt ucode convention — cf. `fw4.uc`, `cli/`, `node-exporter/`). The entry
 `obserwrt.uc` imports `flow.uc`, `reconcile.uc` and `lifecycle.uc`. ucode `.uc`
-modules use `export const foo = function(){...}` (not `export function foo(){}`,
-which this target's ucode rejects) and `import { foo } from './flow.uc'`.
+modules use `export function foo(){…};` (trailing `;` required) and
+`import { foo } from './flow.uc'`.
 
 The repo is used directly as an OpenWrt package feed; package sources under the
 top-level `obserwrt/` package dir (all other top-level dirs, `.github`, `docs`,
@@ -94,6 +94,9 @@ shellcheck obserwrt/files/etc/init.d/obserwrt
 
 # ucode bytecode/compile check (no exec; `-c`; requires stubbing imports)
 # for f in obserwrt/files/usr/share/ucode/obserwrt/*.uc; do ...; done
+
+# Fast ucode lint (node ESM parse + ucode rules; no FP toolchain needed)
+node scripts/uc-lint.mjs
 
 # eBPF compile smoke, both byte orders (real headers, OpenWrt bpf.mk `uapi/` style)
 # Needs the system kernel UAPI + libbpf headers (linux-libc-dev, libbpf-dev):
@@ -129,10 +132,10 @@ docs, which are authoritative:
 
 Known non-JS gotchas that have already bitten this project:
 
-- **`export function foo(){}` is rejected by this ucode.** `.uc` modules export
-  via `export const foo = function(){...}`; import them with
-  `import { foo } from './foo.uc'` (relative path, like node-exporter's
-  `import { fetch_json } from '../http_client.uc'`).
+- **`export function foo(){…}` must end with `;` in a `.uc` module** (this ucode
+  parses the export as an expression statement, so `export function f(){};`).
+  Import with `import { foo } from './foo.uc'` (relative path, like
+  node-exporter's `import { fetch_json } from '../http_client.uc'`).
 - **No function hoisting.** A function declared later in the file is undefined
   when called earlier. Declare before use, or assign at the bottom near `main()`.
 - **No `arr.push()` / `arr.map()` etc. as methods.** Arrays use *global*

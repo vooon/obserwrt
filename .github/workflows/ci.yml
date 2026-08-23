@@ -41,6 +41,13 @@ jobs:
           set -euo pipefail
           shellcheck obserwrt/files/etc/init.d/obserwrt
 
+      - name: Lint ucode modules (node ESM parse + ucode rules)
+        # ucode is ECMAScript-based; node's parser catches syntax, plus a couple
+        # of ucode-specific checks (trailing ';' on export function, no arr.push()).
+        if: ${{ hashFiles('obserwrt/files/usr/share/ucode/obserwrt/*.uc') != '' }}
+        run: |
+          node scripts/uc-lint.mjs
+
       - name: Syntax-check ucode agent
         # Builds ucode from source and compiles each agent module to bytecode
         # (no exec). Import resolution needs the OpenWrt ucode-mod-* .so (e.g.

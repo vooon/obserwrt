@@ -5,6 +5,9 @@
  * (reconcile.uc), and runs the main loop: attach/detach on network.device
  * events + an infrequent status snapshot, and periodic flow reporting.
  */
+
+"use strict";
+
 import { connect } from 'ubus';
 import { ulog_open, ulog, WARN, ERR, ULOG_SYSLOG, LOG_DAEMON, LOG_DEBUG } from 'log';
 import { load_bpf } from './flow.uc';

@@ -5,6 +5,9 @@
  * (`network.device` events + an infrequent startup/safety status snapshot),
  * and reports the flow map. Imported by obserwrt.uc.
  */
+
+"use strict";
+
 import { tc_detach, error as bpf_error } from 'bpf';
 import { cursor } from 'uci';
 import { readfile } from 'fs';
@@ -92,7 +95,7 @@ const detach_device = function(name, ifindex)
 
 /* Enumerate current netifd devices and attach any that match (startup/safety).
  * `ubus` is the connection passed in by the entry script. */
-export const snapshot = function(ubus)
+export function snapshot(ubus)
 {
 	let status = ubus.call('network.device', 'status', {});
 
@@ -115,7 +118,7 @@ export const snapshot = function(ubus)
 
 /* netifd network.device notification handler. Runs outside the entry's
  * try/catch, so it must never throw. */
-export const on_device_event = function(ev)
+export function on_device_event(ev)
 {
 	try {
 		let type = ev && ev.type;
@@ -144,7 +147,7 @@ export const on_device_event = function(ev)
 };
 
 /* Resolve an ifindex to a netdev name for human-readable output. */
-export const rname = function(ifindex)
+export function rname(ifindex)
 {
 	return name_by_index[ifindex] || sprintf('%d', ifindex);
 };
@@ -152,7 +155,7 @@ export const rname = function(ifindex)
 /* Emit a single flow to the exporter (debug output for now; later IPFIX).
  * `k`/`v` are parsed key/value objects (see flow.uc); `expired` marks an
  * inactive flow that lifecycle.uc is about to remove. */
-export const export_flow = function(k, v, expired)
+export function export_flow(k, v, expired)
 {
 	let dir = (k.direction == DIR.INGRESS) ? 'ingress' : 'egress';
 

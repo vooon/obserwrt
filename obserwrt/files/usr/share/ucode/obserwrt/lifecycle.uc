@@ -10,6 +10,9 @@
  * CLOCK_MONOTONIC. ucode's clock(true) reads the same clock, so ages are
  * comparable directly.
  */
+
+"use strict";
+
 import { flows, parse_key, parse_value } from './flow.uc';
 
 const INACTIVE_S = 10;   /* expire/delete a flow idle longer than this */
@@ -29,7 +32,7 @@ const now_ns = function()
 /* One lifecycle pass. `exporter(k, v, expired)` receives the parsed flow key
  * and value objects. Returns { active, expired } counts. Flows idle longer than
  * INACTIVE_S are exported as expired and deleted from the map. */
-export const run = function(exporter)
+export function run(exporter)
 {
 	let now = now_ns();
 	let n = { active: 0, expired: 0 };

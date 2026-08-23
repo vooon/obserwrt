@@ -6,6 +6,9 @@
  * helpers and map accessors exported here:
  *   import { flows, parse_key, purge_device } from './flow.uc'
  */
+
+"use strict";
+
 import { open_module, error as bpf_error, BPF_PROG_TYPE_SCHED_CLS } from 'bpf';
 import * as struct from 'struct';
 
@@ -23,7 +26,7 @@ let bpf = null;   /* loaded module refs */
 /* --- map access ------------------------------------------------------ */
 
 /* Load and verify the eBPF module. Idempotent; returns the refs. */
-export const load_bpf = function() {
+export function load_bpf() {
 	if (bpf)
 		return bpf;
 
@@ -47,12 +50,12 @@ export const load_bpf = function() {
 	return bpf;
 };
 
-export const flows = function() { return bpf.flows; };
-export const ing   = function() { return bpf.ing; };
-export const eg    = function() { return bpf.eg; };
+export function flows() { return bpf.flows; };
+export function ing()   { return bpf.ing; };
+export function eg()    { return bpf.eg; };
 
 /* Drop every flow map entry recorded for the given device incarnation. */
-export const purge_device = function(ifindex) {
+export function purge_device(ifindex) {
 	flows().delete_all(
 		function (key) {
 			return parse_key(key).ifindex == ifindex;
@@ -62,7 +65,7 @@ export const purge_device = function(ifindex) {
 /* --- wire-format parsing (the single struct owner) ------------------- */
 
 /* Decode a raw flow-map key (bytes) into a structured object. */
-export const parse_key = function(raw)
+export function parse_key(raw)
 {
 	let u = struct.unpack(KFMT, raw);
 
@@ -81,7 +84,7 @@ export const parse_key = function(raw)
 };
 
 /* Decode a raw flow-map value (bytes) into a structured object. */
-export const parse_value = function(raw)
+export function parse_value(raw)
 {
 	let u = struct.unpack(VFMT, raw);
 
