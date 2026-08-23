@@ -12,7 +12,9 @@
 #   line 2: the directory containing the built module .so files
 set -eu
 
-UCODE_SHA="b885dd0fe1e974551fb1233ca5f3aa74d80b74d9"  # OpenWrt 25.12
+# The ucode revision OpenWrt 25.12 ships (package/utils/ucode Makefile on the
+# openwrt-25.12 branch, PKG_SOURCE_VERSION). Bump here to match the target.
+UCODE_SHA="85922056ef7abeace3cca3ab28bc1ac2d88e31b1"
 
 out="${1:?usage: build-ucode.sh <output-dir>}"
 rm -rf "$out"
@@ -23,7 +25,17 @@ git -C "$out/src" remote add origin https://github.com/jow-/ucode
 git -C "$out/src" fetch --depth 1 origin "$UCODE_SHA"
 git -C "$out/src" checkout -q FETCH_HEAD
 
-cmake -S "$out/src" -B "$out/src/build" -DBUILD_UCODE_MODULES=ON >"$out/configure.log" 2>&1
+# The older 25.12 ucode source trips -Werror on current gcc (discarded-qualifiers)
+# in its own code; we build it only as a test binary, so neutralize -Werror via
+# a compiler wrapper that appends -Wno-error last (the project sets -Werror itself).
+cat > "$out/cc" <<'SH'
+#!/bin/sh
+exec cc "$@" -Wno-error
+SH
+chmod +x "$out/cc"
+
+cmake -S "$out/src" -B "$out/src/build" -DBUILD_UCODE_MODULES=ON \
+	-DCMAKE_C_COMPILER="$out/cc" >"$out/configure.log" 2>&1
 cmake --build "$out/src/build" -j"$(nproc)" >"$out/build.log" 2>&1
 
 printf '%s\n' "$out/src/build/ucode" "$out/src/build"
