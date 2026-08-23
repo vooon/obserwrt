@@ -1,0 +1,35 @@
+name: e2e
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  goflow2-ipfix:
+    name: goflow2 IPFIX decode
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake gcc make libjson-c-dev git
+
+      - uses: ./.github/actions/build-ucode
+        id: ucode
+
+      - name: Run goflow2 IPFIX e2e (decode emitted flows)
+        # Runs scripts/emit-test.uc (real socket/struct modules) against a
+        # goflow2 collector (docker, --network host) and asserts it decodes the
+        # expected IPv4 + IPv6 flows. uci/bpf/log come from OpenWrt mocks.
+        run: |
+          UCODE_BIN="${{ steps.ucode.outputs.bin }}" \
+          UCODE_MODULES="${{ steps.ucode.outputs.mods }}" \
+            sh scripts/test-ipfix.sh
