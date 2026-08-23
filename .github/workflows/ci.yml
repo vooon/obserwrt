@@ -18,7 +18,7 @@ jobs:
     name: Static checks + eBPF smoke build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install toolchain
         run: |
@@ -111,7 +111,7 @@ jobs:
     name: Feed registration check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Validate feed layout
         run: |
