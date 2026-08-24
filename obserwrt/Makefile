@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=obserwrt
 PKG_VERSION:=0.1.3
-PKG_RELEASE:=2
+PKG_RELEASE:=3
 
 PKG_BUILD_DIR:=$(BUILD_DIR)/obserwrt-$(PKG_VERSION)
 PKG_BUILD_DEPENDS:=bpf-headers
@@ -13,13 +13,28 @@ PKG_MAINTAINER:=Vladimir Ermakov <vooon341@gmail.com>
 include $(INCLUDE_DIR)/package.mk
 include $(INCLUDE_DIR)/bpf.mk
 
+# Flow-map size is a per-image build-time Kconfig (no runtime override exposed by
+# ucode-mod-bpf). Passed to the BPF compile as -DFLOW_MAP_ENTRIES.
+FLOW_MAP_ENTRIES:=$(call qstrip,$(CONFIG_OBSERWRT_FLOW_MAP_ENTRIES))
+FLOW_MAP_ENTRIES:=$(if $(FLOW_MAP_ENTRIES),$(FLOW_MAP_ENTRIES),4096)
+
 define Build/Prepare
 	mkdir -p $(PKG_BUILD_DIR)
 	$(CP) ./src/* $(PKG_BUILD_DIR)/
 endef
 
 define Build/Compile
-	$(call CompileBPF,$(PKG_BUILD_DIR)/obserwrt-bpf.c)
+	$(call CompileBPF,$(PKG_BUILD_DIR)/obserwrt-bpf.c,-DFLOW_MAP_ENTRIES=$(FLOW_MAP_ENTRIES))
+endef
+
+define Package/obserwrt/config
+	if PACKAGE_obserwrt
+
+		config OBSERWRT_FLOW_MAP_ENTRIES
+			int "Max flow map entries"
+			default 4096
+
+	endif
 endef
 
 define Package/obserwrt

@@ -127,6 +127,17 @@ icmp:
 The same 5-tuple observed on two interfaces, or on ingress and egress, is two
 different observations.
 
+The flow key is purely L3/L4: the **VLAN id and L2 MAC addresses are not part of it**.
+This is unambiguous as long as each VLAN carries a distinct L3 subnet (the usual
+case — every VLAN is a different `/24`), because the src/dst addresses already
+separate flows across VLANs. **Caveat:** if two VLANs reuse overlapping L3
+addresses (e.g. RFC 1918 reuse behind different VLANs on the same bridge), their
+flows would collapse in the cache. In that situation the parser still reaches
+the IP header correctly across up to two 802.1Q/802.1ad tags (VLANs are walked
+to find L3, not dropped), but a future option could add `vlanId` to the key or
+value to disambiguate. L2 MACs / VLAN id are currently only enrichment
+candidates, not identity.
+
 ## 5. eBPF layout
 
 ### 5.1 Flow key (46 bytes, packed, native endian)

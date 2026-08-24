@@ -46,6 +46,13 @@ enum {
 /* Bounded IPv6 extension-header walk (verifier-friendly fixed cap). */
 #define MAX_EXT_HDR 8
 
+/* Flow-map capacity. Override at build time via -DFLOW_MAP_ENTRIES
+ * (OpenWrt CONFIG_OBSERWRT_FLOW_MAP_ENTRIES); must exceed zero. The map is an
+ * LRU hash, so at capacity it evicts rather than failing. */
+#ifndef FLOW_MAP_ENTRIES
+#define FLOW_MAP_ENTRIES 4096
+#endif
+
 /* --- maps ------------------------------------------------------------- */
 
 struct flow_key {
@@ -73,7 +80,7 @@ struct flow_val {
 
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
-	__uint(max_entries, 4096);
+	__uint(max_entries, FLOW_MAP_ENTRIES);
 	__type(key, struct flow_key);
 	__type(value, struct flow_val);
 } obserwrt_flows SEC(".maps");
