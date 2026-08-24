@@ -61,9 +61,9 @@ export function bpf_stats() {
 	let out = {};
 
 	for (let i = 0; i < length(STAT_NAMES); i++) {
-		let raw = handle.stats.get(struct.pack('<I', i));
+		let raw = handle.stats.get(STAT_KEY.pack(i));
 
-		out[STAT_NAMES[i]] = (raw === null) ? 0 : struct.unpack('<Q', raw)[0];
+		out[STAT_NAMES[i]] = (raw === null) ? 0 : STAT_VAL.unpack(raw)[0];
 	}
 
 	return out;
@@ -97,6 +97,8 @@ export function detach(name, direction, prio)
  * '<QQQQH6x'; struct/type owner - see docs/design.md §5). */
 const KEY_FMT = struct.new('<LBBBx16s16sHHBB');
 const VAL_FMT = struct.new('<QQQQH6x');
+const STAT_KEY = struct.new('<I');   /* stats array index */
+const STAT_VAL = struct.new('<Q');   /* stats counter value */
 
 /* Decode a raw flow-map key (bytes) into a key object. */
 export function parse_key(raw)
