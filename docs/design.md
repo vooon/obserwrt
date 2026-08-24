@@ -555,3 +555,8 @@ The aim is to make obserwrt trustworthy across the whole mesh / LAN:
   CPU/mem; validate against interface counters and tcpdump.
 - Per-protocol/more-precise expiry and any LRU/map-sizing follow-up driven by
   the soak's measurements, not by theory.
+- **Live flow-map limit (optional; requires a small `ucode-mod-bpf` patch to
+  expose `bpf_map_info.max_entries`).** If adopted, obserwrt should detect at
+  runtime whether the module is patched (capability probe); on an unpatched
+  module it falls back to the baked build-time limit and logs a warning —
+  limited but correct functionality, no hard dependency on the patch.
