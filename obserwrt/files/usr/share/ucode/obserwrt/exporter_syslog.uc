@@ -31,8 +31,11 @@ function key_ip(value, family)
 	return arrtoip(bytes);
 };
 
-function flow_record(k, v, expired)
+function flow_record(k, v, expired, delta)
 {
+	let dp = delta ? delta.packets : v.packets;
+	let db = delta ? delta.bytes : v.bytes;
+
 	return {
 		ifindex: k.ifindex,
 		ifname: ifname(k.ifindex),
@@ -45,8 +48,8 @@ function flow_record(k, v, expired)
 		dst: key_ip(k.dst, k.family),
 		sport: k.sport,
 		dport: k.dport,
-		packets: v.packets,
-		bytes: v.bytes,
+		packets: dp,
+		bytes: db,
 		first_seen_ns: v.first_seen,
 		last_seen_ns: v.last_seen,
 		tcp_flags: v.tcp_flags,
@@ -140,7 +143,7 @@ export function init()
 	return true;
 };
 
-export function emit(k, v, expired)
+export function emit(k, v, expired, delta)
 {
-	send(encode(flow_record(k, v, expired)));
+	send(encode(flow_record(k, v, expired, delta)));
 };

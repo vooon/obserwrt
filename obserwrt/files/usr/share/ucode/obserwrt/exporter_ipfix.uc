@@ -159,16 +159,21 @@ export function flush()
 	pending6 = [];
 };
 
-/* Encode and buffer one flow observation. `k`/`v` are parsed from flow.uc. */
-export function emit(k, v, expired)
+/* Encode and buffer one flow observation. `k`/`v` are parsed from flow.uc;
+ * `delta` is the { packets, bytes } since the last export (lifecycle.uc supplies
+ * it so repeated active exports don't double-count). Falls back to the
+ * cumulative counters when `delta` is omitted. */
+export function emit(k, v, expired, delta)
 {
 	let rec;
+	let dp = delta ? delta.packets : v.packets;
+	let db = delta ? delta.bytes : v.bytes;
 
 	if (k.family == 4) {
 		rec = PACK_V4.pack(
 			substr(k.src, 12, 4), substr(k.dst, 12, 4),
 			k.sport, k.dport, k.protocol,
-			v.packets, v.bytes,
+			dp, db,
 			offset_ms + int(v.first_seen / 1000000),
 			offset_ms + int(v.last_seen / 1000000),
 			v.tcp_flags,
@@ -180,7 +185,7 @@ export function emit(k, v, expired)
 		rec = PACK_V6.pack(
 			k.src, k.dst,
 			k.sport, k.dport, k.protocol,
-			v.packets, v.bytes,
+			dp, db,
 			offset_ms + int(v.first_seen / 1000000),
 			offset_ms + int(v.last_seen / 1000000),
 			v.tcp_flags,

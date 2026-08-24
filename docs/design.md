@@ -263,24 +263,30 @@ point we would select.
 Packet: `lookup(key)` → `create/update` → `packets++`, `bytes += len`,
 `last_seen = now`, accumulate `tcp_flags`. Userspace periodically reads the map.
 
-Initial behavior:
+Each pass hands the exporter the **delta** since the last export
+(`lifecycle.uc` tracks last-exported counters per flow key), so active flows
+re-exported every pass contribute their interval growth rather than cumulative
+totals — the sum of deltas over a flow's lifetime equals its total, and the
+collector is not double-counted. The delta tracker is pruned each pass so
+LRU-evicted flows do not leak state.
 
-- inactive timeout ≈ 10 s;
-- active timeout ≈ 60 s (re-export long-lived flows);
-- expire inactive flows;
-- exported on inactive expiry and periodically otherwise.
+Flows idle longer than their **per-protocol** timeout are exported as expired
+and deleted from the map (timeouts configurable, see §10):
 
-Timeouts become configurable later. Correctness and bounded memory outrank
-sophisticated expiry in v1.
+- TCP ≈ 300 s, UDP ≈ 60 s, ICMP ≈ 30 s, other protocols ≈ 10 s;
+- active flows are re-exported periodically regardless (active timeout is
+  informational; re-export cadence is the lifecycle tick).
+
+Correctness and bounded memory outrank sophisticated expiry.
 
 ## 8. Exporters
 
 Exporters consume normalized observations:
 
 ```text
-emit(flow)
-   ├── ipfix.emit(flow)
-   └── syslog.emit(flow)
+emit(flow, delta)
+   ├── ipfix.emit(flow, delta)
+   └── syslog.emit(flow, delta)
 ```
 
 Additional exporters require no eBPF data-model changes. Dynamic plugin loading
@@ -403,8 +409,10 @@ counts lag behind flows created.
 ```uci
 config obserwrt 'main'
     list device 'awg_*'
-    option inactive_timeout '10'    # expire/delete idle flows after this (s)
-    option active_timeout '60'      # active timeout: re-export long-lived flows
+    option tcp_timeout '300'       # per-protocol idle timeouts (s)
+    option udp_timeout '60'
+    option icmp_timeout '30'
+    option general_timeout '10'
     # option prometheus_textfile '/run/prometheus/textfile/obserwrt.prom'  # unset = disabled
     option prometheus_interval '20'
 
@@ -480,22 +488,20 @@ exporter.
 
 ## 13. Milestones
 
-- **P0 — TC visibility:** prove decrypted traffic is visible on AWG netdevs.
-  Sample `/127` AWG links carry ordinary inner IPv4; generate e.g. ping/iperf
-  between the endpoints and confirm per-ifindex/direction/family/proto counter
-  deltas on both ingress and egress.
-- **P1 — Flow tracking:** 5-tuple accounting; validate against ping/TCP/UDP,
-  IPv4/IPv6; compare against interface/tcpdump totals within explainable deltas.
-- **P2 — Dynamic devices:** start with devices absent, then `ifup/ifdown/ifup`;
-  verify daemon stays alive, attach auto-appears, deletion is harmless, new
-  ifIndex used, other devices unaffected.
-- **P3 — Syslog export:** validate normalized observations independent of IPFIX.
-- **P4 — IPFIX:** capture with tcpdump/Wireshark; verify templates, data records,
-  sequence behavior, IPv4/IPv6, interface IDs, timestamps, counters.
-- **P5 — Akvorado:** flows accepted; src/dst correct; ingress/egress interface
-  populated; SNMP resolves kernel ifIndex; BIRD/BMP enrichment continues to work.
-- **P6 — Real mesh deployment:** observe `awg_*`, `tun_*`, WAN; query by real
-  path/interface.
+Status of the roadmap items (`[x]` = done, `[~]` = partial, `[ ]` = open):
+
+- **[x] P0 — TC visibility:** decrypted traffic visible on AWG netdevs; confirmed
+  per-ifindex/direction/family/proto on ingress and egress.
+- **[x] P1 — Flow tracking:** 5-tuple accounting validated against live traffic.
+- **[x] P2 — Dynamic devices:** `ifup/ifdown/ifup` attach/detach verified on
+  target, new ifIndex used, recreated devices handled.
+- **[x] P3 — Syslog export:** local (logd) and remote (RFC 5424 to VictoriaLogs)
+  both verified on-device.
+- **[x] P4 — IPFIX:** goflow2 decodes emitted flows live (sampler, domain,
+  interfaces, counters).
+- **[x] P5 — Akvorado:** flows reaching the Akvorado/goflow2 intake.
+- **[~] P6 — Real mesh deployment:** running long-term on a core router; full
+  multi-spoke/hub soak with `awg_*`, `tun_*`, WAN is the v0.3 goal.
 
 ## 14. Non-goals for v1
 
@@ -503,6 +509,8 @@ Routing decisions; OSPF/BGP parsing; BIRD control; BMP; SNMP polling; DPI;
 application/YouTube classification; DNS correlation; SOCKS flow correlation;
 NAT/conntrack correlation; TCP RTT/retransmission analysis; anomaly detection;
 topology reconstruction; general Linux packaging; sFlow; NetFlow v5/v9.
+(Note: OSPF/GRE and other arbitrary IP protocols are *observed* as `proto`
+flows — that is accounting, not protocol parsing.)
 
 ## 15. Future probes (architecture space only)
 
@@ -511,10 +519,39 @@ conntrack original↔translated tuple correlation; proxy/socket correlation
 (e.g. hev-socks5-tunnel SOCKS associations); a native exporter able to carry
 richer observations than standard IPFIX.
 
-## 16. Release criteria (v0.1)
+## 16. Release criteria
+
+### v0.1 — met (initial end-to-end)
 
 An OpenWrt user can: add the repo as a feed; build/install the package;
-configure a device list + IPFIX/syslog collector; start with absent devices; create/
-delete selected interfaces without restart; observe IPv4/IPv6 TCP/UDP/ICMP on
-TC ingress/egress; export valid IPFIX with real kernel ifIndex; inspect the same
-observations via syslog; consume the flows in Akvorado.
+configure a device list + IPFIX/syslog collector; start with absent devices;
+create/delete selected interfaces without restart; observe IPv4/IPv6
+TCP/UDP/ICMP on TC ingress/egress; export valid IPFIX with real kernel ifIndex;
+see the same observations via syslog; consume the flows in Akvorado/goflow2.
+Unit tests + CI (static, ucode, goflow2 e2e) are in place.
+
+### v0.2 — in progress (dataplane correctness; released as `0.2`)
+
+- Packet-parser hardening: IPv6 extension-header walk, IPv4/IPv6 fragmentation
+  (non-first fragments accounted as IP-only flows), Ethernet EtherType + 1/2
+  VLAN tags, arbitrary-IP-protocol preservation, IPv4 IHL validation.
+- BPF-truth metrics (packets/bytes/accounted/flows-created) + configurable
+  (Kconfig) flow-map size baked into `bpf_map_limit`.
+- **Active-flow delta accounting** so repeated active exports don't double-count.
+- Per-protocol idle timeouts (tcp/udp/icmp/general).
+- Confirm flows are correct (not just present) in Akvorado/ClickHouse.
+
+### v0.3 — targets
+
+The aim is to make obserwrt trustworthy across the whole mesh / LAN:
+
+- **Bridge / bond observation** (`br-ex`, `br-lan`, bond members): decide and
+  implement the L2 story — likely `vlan_id`/`src_mac` as value enrichment/IPFIX
+  IEs, with an explicit decision whether any of it belongs in the key.
+- **VXLAN-over-OSPF fabric**: decide whether inner-flow (decapsulated) identity
+  is wanted; if so add VXLAN decap parsing; confirm OSPF-underlay visibility.
+- **P6 real mesh soak**: long-term multi-spoke/hub run over `awg_*`, `tun_*`,
+  WAN, and bridges; watch map occupancy, `flows_created`, `accounted/seen`, and
+  CPU/mem; validate against interface counters and tcpdump.
+- Per-protocol/more-precise expiry and any LRU/map-sizing follow-up driven by
+  the soak's measurements, not by theory.

@@ -27,16 +27,17 @@ let syslog_active = false;
 ulog_open(ULOG_SYSLOG, LOG_DAEMON, "obserwrt");
 
 /* Dispatches one normalized observation to all configured exporters and folds
- * it into the Prometheus aggregates. */
-function emit_flow(k, v, expired)
+ * it into the Prometheus aggregates. `delta` is the per-export interval growth
+ * supplied by lifecycle.uc. */
+function emit_flow(k, v, expired, delta)
 {
 	metrics_observe(k, v, expired);
 
 	if (syslog_active)
-		syslog_emit(k, v, expired);
+		syslog_emit(k, v, expired, delta);
 
 	if (ipfix_active)
-		ipfix_emit(k, v, expired);
+		ipfix_emit(k, v, expired, delta);
 }
 
 function main()

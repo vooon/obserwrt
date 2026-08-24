@@ -3,8 +3,10 @@ config obserwrt 'main'
 	# Observe these Linux netdevs (exact names or glob patterns).
 	# Empty by default: obserwrt attaches to nothing until configured.
 	list device 'awg*'
-	option inactive_timeout '10'
-	option active_timeout '60'
+	option tcp_timeout '300'
+	option udp_timeout '60'
+	option icmp_timeout '30'
+	option general_timeout '10'
 	# Enable Prometheus self-observability via the node-exporter textfile
 	# collector by pointing at a writable metrics file (atomic temp+rename).
 	# Unset/empty disables metrics. Metrics are rewritten at most every
