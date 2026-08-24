@@ -24,7 +24,8 @@ import { writefile, rename, error as fs_error } from 'fs';
 import { WARN } from 'log';
 import { parse_uint } from './util.uc';
 
-/* Must match obserwrt_flows max_entries in bpf.c */
+/* Must match obserwrt_flows max_entries in bpf.c (FLOW_MAP_ENTRIES). The package
+ * Makefile rewrites this line to the configured value at install time. */
 const BPF_MAP_LIMIT = 4096;
 
 let active = false;
