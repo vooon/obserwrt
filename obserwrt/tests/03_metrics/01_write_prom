@@ -35,11 +35,13 @@ metrics.write();
 let d = readfile(PATH);
 function has(s) { return index(d, s) != -1; }
 
-printf("flows=%d errors=%d packets=%d bytes=%d live=%d map=%d limit=%d devcount=%d devpa=%d devka=%d\n",
+printf("flows=%d errors=%d pkts=%d byts=%d acc=%d created=%d live=%d map=%d limit=%d devcount=%d devpa=%d devka=%d\n",
 	has('obserwrt_flows_exported_total 4'),
 	has('obserwrt_export_errors_total 1'),
-	has('obserwrt_packets 16'),
-	has('obserwrt_bytes 1464'),
+	has('obserwrt_packets_total 0'),
+	has('obserwrt_bytes_total 0'),
+	has('obserwrt_packets_accounted_total 0'),
+	has('obserwrt_flows_created_total 0'),
 	has('obserwrt_flows_active 2'),
 	has('obserwrt_bpf_map_entries 3'),
 	has('obserwrt_bpf_map_limit 4096'),
@@ -51,5 +53,5 @@ unlink(PATH);
 -- End --
 
 -- Expect stdout --
-flows=1 errors=1 packets=1 bytes=1 live=1 map=1 limit=1 devcount=1 devpa=1 devka=1
+flows=1 errors=1 pkts=1 byts=1 acc=1 created=1 live=1 map=1 limit=1 devcount=1 devpa=1 devka=1
 -- End --

@@ -23,6 +23,7 @@ import { cursor } from 'uci';
 import { writefile, rename, error as fs_error } from 'fs';
 import { WARN } from 'log';
 import { parse_uint } from './util.uc';
+import { bpf_stats } from './flow.uc';
 
 /* Must match obserwrt_flows max_entries in bpf.c (FLOW_MAP_ENTRIES). The package
  * Makefile rewrites this line to the configured value at install time. */
@@ -36,8 +37,6 @@ let total_flows = 0;
 let total_errors = 0;
 let flows_active = 0;
 let map_entries = 0;
-let packets = 0;
-let bytes = 0;
 let devices = [];
 
 /* ---- node-exporter metric formatting (adapted) ---------------------- */
@@ -154,8 +153,6 @@ export function set_state(n, devs)
 
 	flows_active = n.active;
 	map_entries = n.map;
-	packets = n.packets;
-	bytes = n.bytes;
 
 	devices = [];
 	for (let d in devs)
@@ -177,12 +174,16 @@ export function write()
 	if (!active)
 		return;
 
+	let st = bpf_stats();
+
 	out = '';
 
 	counter('obserwrt_flows_exported_total', 'Flow records dispatched to exporters.')({}, total_flows);
 	counter('obserwrt_export_errors_total', 'Export/lifecycle failures.')({}, total_errors);
-	gauge('obserwrt_packets', 'Packets across tracked flows.')({}, packets);
-	gauge('obserwrt_bytes', 'Bytes across tracked flows.')({}, bytes);
+	counter('obserwrt_packets_total', 'Packets seen at TC (all, incl. non-IP).')({}, st.packets);
+	counter('obserwrt_bytes_total', 'Bytes seen at TC (all).')({}, st.bytes);
+	counter('obserwrt_packets_accounted_total', 'Packets that entered flow accounting (IP).')({}, st.parsed);
+	counter('obserwrt_flows_created_total', 'Flow entries created in the BPF map.')({}, st.flows_created);
 	gauge('obserwrt_flows_active', 'Currently live flows.')({}, flows_active);
 	gauge('obserwrt_bpf_map_entries', 'Current flow map entries.')({}, map_entries);
 	gauge('obserwrt_bpf_map_limit', 'Flow map capacity (LRU).')({}, BPF_MAP_LIMIT);

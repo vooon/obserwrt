@@ -55,10 +55,13 @@ export function flows() {
 /* Per-instance aggregate counters (see obserwrt-bpf.c enum). Returned as
  * { packets, bytes, flows_created }. Counter values are exact even when the LRU
  * flow map evicts entries. */
-const STAT_NAMES = [ 'packets', 'bytes', 'flows_created' ];
+const STAT_NAMES = [ 'packets', 'bytes', 'flows_created', 'parsed' ];
 
 export function bpf_stats() {
 	let out = {};
+
+	if (!handle)
+		return { packets: 0, bytes: 0, flows_created: 0, parsed: 0 };
 
 	for (let i = 0; i < length(STAT_NAMES); i++) {
 		let raw = handle.stats.get(STAT_KEY.pack(i));

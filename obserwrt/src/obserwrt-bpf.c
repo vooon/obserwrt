@@ -35,11 +35,16 @@ enum direction {
 	EGRESS  = 1,
 };
 
-/* Per-instance aggregate counters (set A of the "two sets" design). */
+/* Per-instance aggregate counters ("set A" of the "two sets" design).
+ * Packets/bytes count everything the TC filter sees; flows_created counts new
+ * flow inserts (exact even under LRU eviction); parsed counts the subset of
+ * packets that entered flow accounting (all IP, incl. non-first fragments and
+ * non-TCP/UDP/ICMP protocols, but excluding ARP / non-IP / malformed). */
 enum {
 	STAT_PACKETS = 0,
 	STAT_BYTES,
 	STAT_FLOWS_CREATED,
+	STAT_PARSED,
 	STAT_MAX,
 };
 
@@ -199,6 +204,8 @@ observe(struct __sk_buff *skb, __u8 direction)
 
 		family = 4;
 		ihl = (__u32)(ip[0] & 0x0f) << 2;
+		if (ihl < 20 || ip + ihl > data_end)
+			return TC_ACT_OK;
 		proto = ip[9];
 		l4 = ip + ihl;
 
@@ -271,6 +278,9 @@ observe(struct __sk_buff *skb, __u8 direction)
 		}
 		/* other protocols: no ports/icmp, sport/dport/icmp stay 0 */
 	}
+
+	/* Reached the flow accounting path: count as "parsed/accounted". */
+	stat_add(STAT_PARSED, 1);
 
 	struct flow_key key = { 0 };
 

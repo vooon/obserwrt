@@ -138,6 +138,21 @@ to find L3, not dropped), but a future option could add `vlanId` to the key or
 value to disambiguate. L2 MACs / VLAN id are currently only enrichment
 candidates, not identity.
 
+**Packet parsing** (in `obserwrt-bpf.c`): IPv6 walks up to 8 extension headers
+(Hop-by-Hop, Routing, Destination Options, AH, Fragment); the IPv4 path
+validates IHL ≥ 20. Non-first fragments (IPv4 offset ≠ 0, or an IPv6 Fragment
+header with non-zero offset) carry no transport header, so they are accounted
+as **IP-only** flows (`sport/dport/icmp = 0`, `proto` kept) — note this is a
+*distinct* flow key from the first fragment (which has ports), so a fragmented
+flow appears as two keys. Arbitrary IP protocols (OSPF 89, GRE 47, …) are
+retained with ports 0, not dropped.
+
+L2 is intentionally not part of identity (see above). MACs would become relevant
+for bond member tracking or observing bridge/VXLAN; VXLAN-over-OSPF currently
+appears as the outer UDP `4789` tunnel flow (and the OSPF underlay is now visible
+as `proto=89`), while the *inner* MAC/IP would need VXLAN decapsulation — a
+future parser extension, not planned for v1.
+
 ## 5. eBPF layout
 
 ### 5.1 Flow key (46 bytes, packed, native endian)
@@ -351,14 +366,21 @@ Example JSON payload:
 
 ## 9. Self-observability
 
-Individual flows are **never** placed into Prometheus labels. Exposed metrics:
+Individual flows are **never** placed into Prometheus labels. Metrics come from
+two sources, split honestly between BPF truth and userspace:
 
-- counters: `obserwrt_flows_exported_total`, `obserwrt_export_errors_total`
-- gauges: `obserwrt_packets`, `obserwrt_bytes` (sum across tracked flows this
-  pass), `obserwrt_flows_active`, `obserwrt_bpf_map_entries`,
-  `obserwrt_bpf_map_limit`, `obserwrt_devices_attached`, and per-netdev
-  `obserwrt_device_attached{ifname="..."}` so operators can see **which**
-  interfaces are observed, not just how many.
+- **counters, BPF truth** (`obserwrt_stats` map, incremented in-kernel, exact
+  even under LRU eviction):
+  `obserwrt_packets_total` / `obserwrt_bytes_total` (everything the TC filter
+  saw, including non-IP like ARP), `obserwrt_packets_accounted_total` (the
+  subset that entered flow accounting — all IP, incl. non-first fragments and
+  non-TCP/UDP/ICMP protocols), `obserwrt_flows_created_total` (new flow inserts).
+  The `accounted/seen` ratio hence shows how much non-IP/unsupported traffic the
+  observation point carries (useful on WAN/Ethernet; near 1 on AWG/L3).
+- **counters, userspace**: `obserwrt_flows_exported_total`, `obserwrt_export_errors_total`.
+- **gauges**: `obserwrt_flows_active`, `obserwrt_bpf_map_entries`,
+  `obserwrt_bpf_map_limit` (baked to the built map size), `obserwrt_devices_attached`,
+  and per-netdev `obserwrt_device_attached{ifname="..."}`.
 
 Metrics are published via the **Prometheus textfile collector**: `metrics.uc`
 writes a `.prom` file atomically (temp file + rename, all-or-nothing) that a
@@ -371,7 +393,10 @@ independent of the 5s lifecycle flush.
 
 The flow map is an **LRU hash**, so at capacity it evicts rather than failing;
 saturation is visible as `obserwrt_bpf_map_entries` approaching
-`obserwrt_bpf_map_limit`.
+`obserwrt_bpf_map_limit`. LRU eviction itself is not directly observable;
+signs of table pressure are high `obserwrt_flows_created_total` churn combined
+with `obserwrt_bpf_map_entries` near the limit while userspace dispatched
+counts lag behind flows created.
 
 ## 10. Configuration (UCI)
 
