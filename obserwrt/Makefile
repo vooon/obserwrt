@@ -75,8 +75,9 @@ define Package/obserwrt/install
 		$(1)/usr/share/ucode/obserwrt/
 	$(INSTALL_DATA) ./files/etc/config/obserwrt $(1)/etc/config/
 	# Bake the built flow-map size into the installed metrics.uc so
-	# obserwrt_bpf_map_limit matches obserwrt_flows max_entries.
-	$(SED) -i 's/^const BPF_MAP_LIMIT = .*/const BPF_MAP_LIMIT = $(FLOW_MAP_ENTRIES);/' $(1)/usr/share/ucode/obserwrt/metrics.uc
+	# obserwrt_bpf_map_limit matches obserwrt_flows max_entries. `$(SED)` already
+	# carries `-i -e`.
+	$(SED) 's/^const BPF_MAP_LIMIT = .*/const BPF_MAP_LIMIT = $(FLOW_MAP_ENTRIES);/' $(1)/usr/share/ucode/obserwrt/metrics.uc
 	$(INSTALL_BIN) ./files/etc/init.d/obserwrt $(1)/etc/init.d/
 endef
 
