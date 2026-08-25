@@ -43,7 +43,10 @@ define Package/obserwrt
   SUBMENU:=obserwrt
   TITLE:=eBPF network observability agent
   URL:=https://github.com/vooon/obserwrt
-  DEPENDS:=+ucode +ucode-mod-bpf +ucode-mod-ubus +ucode-mod-struct +ucode-mod-log +ucode-mod-fs +ucode-mod-uloop +ucode-mod-socket +libbpf $(BPF_DEPENDS)
+  DEPENDS:=+ucode +ucode-mod-bpf +ucode-mod-ubus +ucode-mod-struct +ucode-mod-log +ucode-mod-fs +ucode-mod-uloop +ucode-mod-socket \
+	   +libbpf $(BPF_DEPENDS) \
+	   +@KERNEL_DEBUG_INFO +@KERNEL_DEBUG_INFO_BTF +@KERNEL_BPF_EVENTS +@KERNEL_NET_NS \
+	   +kmod-ipsec
 endef
 
 define Package/obserwrt/description
