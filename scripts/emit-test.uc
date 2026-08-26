@@ -30,6 +30,10 @@ function v4in6(a, b, c, d)
 if (!connect(HOST, PORT, null))
 	die('exporter connect failed');
 
+/* connect() sends the IPFIX template; give the collector (goflow2) time to
+ * ingest it before the data records arrive, so the template is known. */
+sleep(200);
+
 /* IPv4 TCP, egress (direction=1), ifindex 29, src 192.0.2.1 -> dst 198.51.100.2 */
 emit(
 	{
