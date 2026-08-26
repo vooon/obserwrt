@@ -486,6 +486,13 @@ Using the real kernel ifIndex lets Akvorado correlate IPFIX interface IDs with
 SNMP interface data. Backend-specific workarounds stay confined to the IPFIX
 exporter.
 
+**Live (v0.2/soak):** flows land in the ClickHouse **`default`** database:
+`default.flows` (raw, ~37M rows and growing), rolled-up `flows_1m0s`/`_5m0s`/`_1h0m0s`,
+and the `exporters` (294), `asns`, `protocols`, `tcp`, `udp`, `icmp` dimensions.
+`ExporterSite` currently shows **6 mesh sites**. Outlet enrichment (SNMP
+ifIndex->name, BGP ASN/routing) is active; a few spokes still need an snmpd
+answering at the expected community so their interface names resolve.
+
 ## 13. Milestones
 
 Status of the roadmap items (`[x]` = done, `[~]` = partial, `[ ]` = open):
@@ -497,11 +504,14 @@ Status of the roadmap items (`[x]` = done, `[~]` = partial, `[ ]` = open):
   target, new ifIndex used, recreated devices handled.
 - **[x] P3 — Syslog export:** local (logd) and remote (RFC 5424 to VictoriaLogs)
   both verified on-device.
-- **[x] P4 — IPFIX:** goflow2 decodes emitted flows live (sampler, domain,
-  interfaces, counters).
-- **[x] P5 — Akvorado:** flows reaching the Akvorado/goflow2 intake.
-- **[~] P6 — Real mesh deployment:** running long-term on a core router; full
-  multi-spoke/hub soak with `awg_*`, `tun_*`, WAN is the v0.3 goal.
+- **[x] P4 — IPFIX:** emitted flows decode live; goflow2 -> Akvorado inlet.
+- **[x] P5 — Akvorado:** flows reach the real Akvorado (inlet -> Kafka -> outlet ->
+  ClickHouse), with SNMP ifIndex/interface enrichment and BGP routing enrichment.
+- **[~] P6 — Real mesh deployment:** **soak is live.** obserwrt is running across
+  the mesh into Akvorado/ClickHouse; ~37M flows ingested, **6 mesh sites**,
+  294 exporters, 1m/5m/1h aggregations running. Long-term monitoring of map
+  occupancy, `flows_created` churn, `accounted/seen`, CPU/mem continues; bridge/
+  bond and VXLAN observations remain open v0.3 items.
 
 ## 14. Non-goals for v1
 
@@ -539,20 +549,22 @@ Unit tests + CI (static, ucode, goflow2 e2e) are in place.
   (Kconfig) flow-map size baked into `bpf_map_limit`.
 - **Active-flow delta accounting** so repeated active exports don't double-count.
 - Per-protocol idle timeouts (tcp/udp/icmp/general).
-- Confirm flows are correct (not just present) in Akvorado/ClickHouse.
+- Flows confirmed correct (not just present) in Akvorado/ClickHouse; full-mesh
+  soak running (see §12/§13).
 
 ### v0.3 — targets
 
 The aim is to make obserwrt trustworthy across the whole mesh / LAN:
 
+- **Soak (ONGOING):** multi-spoke/hub run over `awg_*`, `tun_*`, WAN, and
+  bridges; ~37M flows in ClickHouse across 6 sites as of the v0.2 unlock. Watch
+  map occupancy, `flows_created`, `accounted/seen`, CPU/mem, and validate
+  against interface counters/tcpdump over days, not hours.
 - **Bridge / bond observation** (`br-ex`, `br-lan`, bond members): decide and
   implement the L2 story — likely `vlan_id`/`src_mac` as value enrichment/IPFIX
   IEs, with an explicit decision whether any of it belongs in the key.
 - **VXLAN-over-OSPF fabric**: decide whether inner-flow (decapsulated) identity
   is wanted; if so add VXLAN decap parsing; confirm OSPF-underlay visibility.
-- **P6 real mesh soak**: long-term multi-spoke/hub run over `awg_*`, `tun_*`,
-  WAN, and bridges; watch map occupancy, `flows_created`, `accounted/seen`, and
-  CPU/mem; validate against interface counters and tcpdump.
 - Per-protocol/more-precise expiry and any LRU/map-sizing follow-up driven by
   the soak's measurements, not by theory.
 - **Live flow-map limit (optional; requires a small `ucode-mod-bpf` patch to
