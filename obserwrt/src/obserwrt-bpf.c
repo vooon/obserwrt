@@ -197,6 +197,12 @@ observe(struct __sk_buff *skb, __u8 direction)
 		ip = data + l3off;
 	}
 
+	/* Enough for the IP version nibble; family branches re-check the full
+	 * header length below (computed `ip` may sit past the Ethernet+2-VLAN
+	 * offset, so this is not covered by the frame-length check above). */
+	if (ip + 2 > data_end)
+		return TC_ACT_OK;
+
 	/* IP header. */
 	if ((ip[0] >> 4) == 4) {
 		if (ip + 20 > data_end)
