@@ -15,6 +15,10 @@ import * as struct from 'struct';
 flow.load_bpf();
 let m = flow.flows();
 
+/* bpf_stats must be callable once the module is loaded (exercises STAT_KEY/STAT_VAL). */
+let s0 = flow.bpf_stats();
+printf("stats=%d,%d,%d,%d\n", s0.packets, s0.bytes, s0.flows_created, s0.parsed);
+
 /* A TCP flow key: ifindex=1, ingress, IPv4, proto 6, 192.0.2.1:12345 -> 198.51.100.2:443 */
 function key() {
 	return struct.pack('<LBBBx16s16sHHBB', 1, 0, 4, 6,
@@ -55,6 +59,7 @@ printf("pass3 expired=%d removed=%d\n", (seen[0] && seen[0].expired) ? 1 : 0, n.
 -- End --
 
 -- Expect stdout --
+stats=0,0,0,0
 pass1 deltas=5,500 exp=0
 pass2 deltas=3,300
 pass3 expired=1 removed=1

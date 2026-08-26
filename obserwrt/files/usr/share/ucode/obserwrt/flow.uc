@@ -56,6 +56,8 @@ export function flows() {
  * { packets, bytes, flows_created }. Counter values are exact even when the LRU
  * flow map evicts entries. */
 const STAT_NAMES = [ 'packets', 'bytes', 'flows_created', 'parsed' ];
+const STAT_KEY = struct.new('<I');   /* stats array index */
+const STAT_VAL = struct.new('<Q');   /* stats counter value */
 
 export function bpf_stats() {
 	let out = {};
@@ -100,8 +102,6 @@ export function detach(name, direction, prio)
  * '<QQQQH6x'; struct/type owner - see docs/design.md §5). */
 const KEY_FMT = struct.new('<LBBBx16s16sHHBB');
 const VAL_FMT = struct.new('<QQQQH6x');
-const STAT_KEY = struct.new('<I');   /* stats array index */
-const STAT_VAL = struct.new('<Q');   /* stats counter value */
 
 /* Decode a raw flow-map key (bytes) into a key object. */
 export function parse_key(raw)
