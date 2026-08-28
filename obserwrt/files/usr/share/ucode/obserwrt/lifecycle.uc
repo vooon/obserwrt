@@ -93,7 +93,13 @@ export function run(exporter)
 
 	flows().foreach(function (key) {
 		let k = parse_key(key);
-		let v = parse_value(flows().get(key));
+		let raw = flows().get(key);
+
+		/* The key may have been LRU-evicted between iteration and the read. */
+		if (raw === null)
+			return;
+
+		let v = parse_value(raw);
 		let fk = flow_key(k);
 		let age_s = (now - v.last_seen) / 1000000000.0;
 		let p0 = last[fk] ? last[fk].p : 0;
