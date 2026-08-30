@@ -265,17 +265,23 @@ Packet: `lookup(key)` → `create/update` → `packets++`, `bytes += len`,
 
 Each pass hands the exporter the **delta** since the last export
 (`lifecycle.uc` tracks last-exported counters per flow key), so active flows
-re-exported every pass contribute their interval growth rather than cumulative
-totals — the sum of deltas over a flow's lifetime equals its total, and the
-collector is not double-counted. The delta tracker is pruned each pass so
-LRU-evicted flows do not leak state.
+contribute their interval growth rather than cumulative totals — the sum of
+deltas over a flow's lifetime equals its total, and the collector is not
+double-counted. A flow with **no new traffic since the last pass is not
+re-emitted** (its delta is zero, so the record would be valueless). The pass is
+O(map size) in userspace, so this keeps per-tick work proportional to actual
+activity rather than map occupancy; on large maps (sites run up to 32k flows)
+every-tick re-export of idle flows pinned a core. The delta tracker is keyed by
+the hex of the raw map key (the 46-byte key is mostly zero bytes, which ucode
+object keys cannot hold), and pruned each pass so LRU-evicted flows do not leak
+state.
 
 Flows idle longer than their **per-protocol** timeout are exported as expired
 and deleted from the map (timeouts configurable, see §10):
 
 - TCP ≈ 300 s, UDP ≈ 60 s, ICMP ≈ 30 s, other protocols ≈ 10 s;
-- active flows are re-exported periodically regardless (active timeout is
-  informational; re-export cadence is the lifecycle tick).
+- active flows with activity are re-exported on the lifecycle tick (active
+  timeout stays informational; re-export cadence is the lifecycle tick).
 
 Correctness and bounded memory outrank sophisticated expiry.
 
