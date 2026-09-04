@@ -14,8 +14,8 @@
 #include <cstdint>
 #include <initializer_list>
 #include <string>
+#include <unordered_set>
 #include <utility>
-#include <vector>
 
 namespace obserwrt
 {
@@ -52,7 +52,7 @@ class PromExposition
 
       private:
 	std::string out_;
-	std::vector<std::string> declared_; /* families with headers emitted */
+	std::unordered_set<std::string> declared_; /* families whose header is out */
 };
 
 } /* namespace obserwrt */

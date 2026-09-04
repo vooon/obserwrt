@@ -4,15 +4,13 @@
 
 #include "prometheus.hpp"
 
-#include <algorithm>
-
 namespace obserwrt
 {
 
 void PromExposition::sample(const char *name, const char *type, const char *help,
 			    const std::string &labels, uint64_t value)
 {
-	if (std::find(declared_.begin(), declared_.end(), name) == declared_.end()) {
+	if (declared_.insert(name).second) {
 		out_ += "# HELP ";
 		out_ += name;
 		out_ += ' ';
@@ -23,7 +21,6 @@ void PromExposition::sample(const char *name, const char *type, const char *help
 		out_ += ' ';
 		out_ += type;
 		out_ += '\n';
-		declared_.push_back(name);
 	}
 
 	out_ += name;
