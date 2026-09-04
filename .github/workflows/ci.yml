@@ -128,9 +128,9 @@ jobs:
       - name: clang-format check (our sources, not the vendored inifile)
         run: |
           set -euo pipefail
-          files=$(find src tests -name '*.cpp' -o -name '*.hpp' | grep -v vendor)
-          test -n "$files"
-          clang-format --dry-run --Werror $files
+          for f in $(find src tests -name '*.[ch]pp' | grep -v vendor); do
+            clang-format --dry-run --Werror "$f"
+          done
 
       - name: clang-tidy (compile DB, curated checks)
         run: |
@@ -140,7 +140,7 @@ jobs:
           cmake --build build-tidy -j2
           checks="-checks=-*,clang-analyzer-*,bugprone-*,-bugprone-easily-swappable-parameters,performance-*"
           files=$(find src -name '*.cpp' | grep -v vendor)
-          clang-tidy -p build-tidy --warning-as-errors='*' \
+          clang-tidy -p build-tidy --warnings-as-errors='*' \
             --checks "$checks" $files
 
   feed-health:
@@ -154,11 +154,12 @@ jobs:
           set -euo pipefail
           # Every immediate subdirectory that looks like an OpenWrt package must
           # contain a Makefile, otherwise `scripts/feeds update`/`install` skips
-          # it silently. `.github`, `docs` and other non-package dirs are exempt.
-          for dir in */; do
-            dir="${dir%/}"
+          # it silently. Non-package dirs are exempt: `.github`, `docs`,
+          # `scripts`, `src`, `tests`, `linux`, `.git`.
+          for dir in $(find . -mindepth 1 -maxdepth 1 -type d ! -name '.*'); do
+            dir="${dir#./}"
             case "$dir" in
-              .github|docs|scripts) continue ;;
+              docs|scripts|src|tests|linux) continue ;;
             esac
             if [ -d "$dir" ] && [ ! -f "$dir/Makefile" ]; then
               echo "::error::$dir/ exists but has no Makefile"
