@@ -155,11 +155,11 @@ jobs:
           # Every immediate subdirectory that looks like an OpenWrt package must
           # contain a Makefile, otherwise `scripts/feeds update`/`install` skips
           # it silently. Non-package dirs are exempt: `.github`, `docs`,
-          # `scripts`, `src`, `tests`, `linux`, `.git`.
+          # `scripts`, `src`, `tests`, `linux`, `vendor`, `.git`.
           for dir in $(find . -mindepth 1 -maxdepth 1 -type d ! -name '.*'); do
             dir="${dir#./}"
             case "$dir" in
-              docs|scripts|src|tests|linux) continue ;;
+              docs|scripts|src|tests|linux|vendor) continue ;;
             esac
             if [ -d "$dir" ] && [ ! -f "$dir/Makefile" ]; then
               echo "::error::$dir/ exists but has no Makefile"
