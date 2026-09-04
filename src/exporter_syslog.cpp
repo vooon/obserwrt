@@ -8,6 +8,11 @@
 
 #include "exporter_syslog.hpp"
 
+/* nlohmann/json (vendored, MIT). Compiled exceptions-free (JSON_NOEXCEPTION);
+ * only serialization is used here, so error paths compile out. */
+#define JSON_NOEXCEPTION
+#include <nlohmann/json.hpp>
+
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <syslog.h>
@@ -56,28 +61,6 @@ std::string addr_text(const uint8_t *a, uint8_t family)
 	char buf[INET6_ADDRSTRLEN];
 	inet_ntop(AF_INET6, a, buf, sizeof(buf));
 	return buf;
-}
-
-/* JSON string escaping (ucode %J semantics for strings). */
-void json_escape(std::string &out, const char *s, size_t n)
-{
-	out.push_back('"');
-	for (size_t i = 0; i < n; i++) {
-		switch (s[i]) {
-		case '"':
-			out += "\\\"";
-			break;
-		case '\\':
-			out += "\\\\";
-			break;
-		case '\n':
-			out += "\\n";
-			break;
-		default:
-			out.push_back(s[i]);
-		}
-	}
-	out.push_back('"');
 }
 
 SyslogRecord make_record(const FlowKey &k, const FlowValue &v, bool expired, const Delta *delta,
@@ -223,44 +206,29 @@ std::string SyslogExporter::encode_json(const FlowKey &k, const FlowValue &v, bo
 					const Delta *delta, const std::string &ifname)
 {
 	const SyslogRecord r = make_record(k, v, expired, delta, ifname);
-	std::string out;
-	out.reserve(320);
-	out += "{\"ifindex\":";
-	out += fmt_u64(r.ifindex);
-	out += ",\"ifname\":";
-	json_escape(out, r.ifname.data(), r.ifname.size());
-	out += ",\"direction\":";
-	json_escape(out, r.direction.data(), r.direction.size());
-	out += ",\"family\":";
-	out += std::to_string(r.family);
-	out += ",\"protocol\":";
-	out += std::to_string(r.protocol);
-	out += ",\"icmp_type\":";
-	out += std::to_string(r.icmp_type);
-	out += ",\"icmp_code\":";
-	out += std::to_string(r.icmp_code);
-	out += ",\"src\":";
-	json_escape(out, r.src.data(), r.src.size());
-	out += ",\"dst\":";
-	json_escape(out, r.dst.data(), r.dst.size());
-	out += ",\"sport\":";
-	out += fmt_u64(r.sport);
-	out += ",\"dport\":";
-	out += fmt_u64(r.dport);
-	out += ",\"packets\":";
-	out += fmt_u64(r.packets);
-	out += ",\"bytes\":";
-	out += fmt_u64(r.bytes);
-	out += ",\"first_seen_ns\":";
-	out += fmt_u64(r.first_seen_ns);
-	out += ",\"last_seen_ns\":";
-	out += fmt_u64(r.last_seen_ns);
-	out += ",\"tcp_flags\":";
-	out += fmt_u64(r.tcp_flags);
-	out += ",\"expired\":";
-	out += r.expired ? "true" : "false";
-	out += "}";
-	return out;
+
+	/* ordered_json preserves key insertion order (mirrors the ucode %J field
+	 * order so downstream diffs stay readable). */
+	nlohmann::ordered_json o;
+	o["ifindex"] = r.ifindex;
+	o["ifname"] = r.ifname;
+	o["direction"] = r.direction;
+	o["family"] = r.family;
+	o["protocol"] = r.protocol;
+	o["icmp_type"] = r.icmp_type;
+	o["icmp_code"] = r.icmp_code;
+	o["src"] = r.src;
+	o["dst"] = r.dst;
+	o["sport"] = r.sport;
+	o["dport"] = r.dport;
+	o["packets"] = r.packets;
+	o["bytes"] = r.bytes;
+	o["first_seen_ns"] = r.first_seen_ns;
+	o["last_seen_ns"] = r.last_seen_ns;
+	o["tcp_flags"] = r.tcp_flags;
+	o["expired"] = r.expired;
+	/* dump() without arguments: compact, no spaces, proper escaping. */
+	return o.dump();
 }
 
 std::string SyslogExporter::encode_logfmt(const FlowKey &k, const FlowValue &v, bool expired,
@@ -272,7 +240,7 @@ std::string SyslogExporter::encode_logfmt(const FlowKey &k, const FlowValue &v, 
 	out += "ifindex=";
 	out += fmt_u64(r.ifindex);
 	out += " ifname=";
-	json_escape(out, r.ifname.data(), r.ifname.size());
+	out += nlohmann::json(r.ifname).dump();
 	out += " direction=";
 	out += r.direction;
 	out += " family=";
@@ -284,9 +252,9 @@ std::string SyslogExporter::encode_logfmt(const FlowKey &k, const FlowValue &v, 
 	out += " icmp_code=";
 	out += std::to_string(r.icmp_code);
 	out += " src=";
-	json_escape(out, r.src.data(), r.src.size());
+	out += nlohmann::json(r.src).dump();
 	out += " dst=";
-	json_escape(out, r.dst.data(), r.dst.size());
+	out += nlohmann::json(r.dst).dump();
 	out += " sport=";
 	out += fmt_u64(r.sport);
 	out += " dport=";

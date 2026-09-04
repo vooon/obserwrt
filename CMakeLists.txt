@@ -78,15 +78,16 @@ add_library(obserwrt_core OBJECT
   src/metrics.cpp)
 
 target_include_directories(obserwrt_core PUBLIC src)
-# Vendored inifile-cpp on the SYSTEM include path: compilers and clang-tidy
-# Config backends: vendored inifile-cpp as a system include with -fexceptions
-# on that TU only (the library throws); the libuci backend is exception-free.
+# Vendored third-party code (inifile-cpp, nlohmann/json) on the SYSTEM
+# include path: compilers and clang-tidy treat it as third-party code.
+target_include_directories(obserwrt_core SYSTEM PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/vendor)
+
+# Config backend: libuci is exception-free; inifile-cpp throws so its TU keeps
+# -fexceptions contained.
 if(OBSEWRRT_USE_LIBUCI)
   target_link_libraries(obserwrt_core PUBLIC uci)
 else()
-  target_include_directories(obserwrt_core SYSTEM PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/vendor)
-  # inifile-cpp throws; keep -fexceptions contained to its TU only.
   set_source_files_properties(src/config_mini.cpp PROPERTIES
     COMPILE_OPTIONS "-fexceptions")
 endif()
