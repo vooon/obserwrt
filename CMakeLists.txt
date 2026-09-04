@@ -77,6 +77,7 @@ add_library(obserwrt_core OBJECT
   src/exporter_syslog.cpp
   src/lifecycle.cpp
   src/metrics.cpp
+  src/prometheus.cpp
   src/reconcile.cpp)
 
 target_include_directories(obserwrt_core PUBLIC src)

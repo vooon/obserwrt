@@ -16,24 +16,11 @@
 #include <cstring>
 #include <string>
 
+#include "prometheus.hpp"
 #include "version.hpp"
 
 namespace obserwrt
 {
-
-namespace
-{
-
-void prom_line(std::string &out, const char *name, const char *labels, const char *value)
-{
-	out += name;
-	out += labels;
-	out += ' ';
-	out += value;
-	out += '\n';
-}
-
-} /* namespace */
 
 void Metrics::init(const Config &cfg)
 {
@@ -87,58 +74,40 @@ void Metrics::write()
 	if (!active_)
 		return;
 
-	std::string out;
+	PromExposition px;
 
 	/* Build information: constant gauge, low cardinality. */
-	out += "# HELP obserwrt_build_info Build and version information.\n";
-	out += "# TYPE obserwrt_build_info gauge\n";
-	{
-		const BuildInfo b = build_info();
-		std::string labels;
-		labels.reserve(96);
-		labels += "{version=\"";
-		labels.append(b.version);
-		labels += "\",commit=\"";
-		labels.append(b.commit);
-		labels += "\",os=\"";
-		labels.append(b.os);
-		labels += "\",arch=\"";
-		labels.append(b.arch);
-		labels += "\"}";
-		prom_line(out, "obserwrt_build_info", labels.c_str(), "1");
-	}
+	const BuildInfo b = build_info();
+	px.gauge("obserwrt_build_info", "Build and version information.",
+		 PromExposition::labels({
+		     {"version", b.version.data()},
+		     {"commit", b.commit.data()},
+		     {"os", b.os.data()},
+		     {"arch", b.arch.data()},
+		 }),
+		 1);
 
-	out += "# TYPE obserwrt_flows_exported_total counter\n";
-	prom_line(out, "obserwrt_flows_exported_total", "", std::to_string(total_flows_).c_str());
-	out += "# TYPE obserwrt_export_errors_total counter\n";
-	prom_line(out, "obserwrt_export_errors_total", "", std::to_string(total_errors_).c_str());
-	out += "# TYPE obserwrt_packets_total counter\n";
-	prom_line(out, "obserwrt_packets_total", "", std::to_string(bpf_packets_).c_str());
-	out += "# TYPE obserwrt_bytes_total counter\n";
-	prom_line(out, "obserwrt_bytes_total", "", std::to_string(bpf_bytes_).c_str());
-	out += "# TYPE obserwrt_packets_accounted_total counter\n";
-	prom_line(out, "obserwrt_packets_accounted_total", "",
-		  std::to_string(bpf_accounted_).c_str());
-	out += "# TYPE obserwrt_flows_created_total counter\n";
-	prom_line(out, "obserwrt_flows_created_total", "",
-		  std::to_string(bpf_flows_created_).c_str());
-	out += "# TYPE obserwrt_flows_active gauge\n";
-	prom_line(out, "obserwrt_flows_active", "", std::to_string(flows_active_).c_str());
-	out += "# TYPE obserwrt_bpf_map_entries gauge\n";
-	prom_line(out, "obserwrt_bpf_map_entries", "", std::to_string(map_entries_).c_str());
-	out += "# TYPE obserwrt_bpf_map_limit gauge\n";
-	prom_line(out, "obserwrt_bpf_map_limit", "", std::to_string(map_limit_).c_str());
-	out += "# TYPE obserwrt_devices_attached gauge\n";
-	prom_line(out, "obserwrt_devices_attached", "", std::to_string(devices_.size()).c_str());
-	out += "# TYPE obserwrt_device_attached gauge\n";
-	for (const auto &d : devices_) {
-		std::string labels;
-		labels.reserve(d.size() + 16);
-		labels += "{ifname=\"";
-		labels.append(d);
-		labels += "\"}";
-		prom_line(out, "obserwrt_device_attached", labels.c_str(), "1");
-	}
+	px.counter("obserwrt_flows_exported_total", "Flow records dispatched to exporters.", "",
+		   total_flows_);
+	px.counter("obserwrt_export_errors_total", "Export/lifecycle failures.", "", total_errors_);
+	px.counter("obserwrt_packets_total", "Packets seen at TC (all, incl. non-IP).", "",
+		   bpf_packets_);
+	px.counter("obserwrt_bytes_total", "Bytes seen at TC (all).", "", bpf_bytes_);
+	px.counter("obserwrt_packets_accounted_total", "Packets that entered flow accounting (IP).",
+		   "", bpf_accounted_);
+	px.counter("obserwrt_flows_created_total", "Flow entries created in the BPF map.", "",
+		   bpf_flows_created_);
+	px.gauge("obserwrt_flows_active", "Currently live flows.", "", flows_active_);
+	px.gauge("obserwrt_bpf_map_entries", "Current flow map entries.", "", map_entries_);
+	px.gauge("obserwrt_bpf_map_limit", "Flow map capacity (LRU).", "", map_limit_);
+	px.gauge("obserwrt_devices_attached", "Number of attached netdevs.", "",
+		 static_cast<uint64_t>(devices_.size()));
+
+	for (const auto &d : devices_)
+		px.gauge("obserwrt_device_attached", "Attached netdev (1 if attached).",
+			 PromExposition::labels({{"ifname", d.c_str()}}), 1);
+
+	const std::string &out = px.str();
 
 	const std::string tmp = file_ + ".tmp";
 	int fd = open(tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);

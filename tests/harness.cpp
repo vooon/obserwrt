@@ -24,6 +24,7 @@
 #include "exporter_syslog.hpp"
 #include "flow.hpp"
 #include "lifecycle.hpp"
+#include "prometheus.hpp"
 
 typedef obserwrt::FlowKey FK;
 typedef obserwrt::FlowValue FV;
@@ -510,6 +511,50 @@ static void test_config_mini()
 	CHECK(!err.empty());
 }
 
+/* ---------- Prometheus exposition builder ---------- */
+
+static size_t count_occ(const std::string &hay, const std::string &needle)
+{
+	size_t n = 0;
+	size_t pos = 0;
+	while ((pos = hay.find(needle, pos)) != std::string::npos) {
+		n++;
+		pos += needle.size();
+	}
+	return n;
+}
+
+static void test_prometheus()
+{
+	obserwrt::PromExposition px;
+	px.counter("obserwrt_flows_exported_total", "Flow records dispatched to exporters.", "", 4);
+	px.counter("obserwrt_flows_exported_total", "Flow records dispatched to exporters.", "", 5);
+	px.gauge("obserwrt_build_info", "Build and version information.",
+		 obserwrt::PromExposition::labels({{"version", "1.0"}, {"commit", ""}}), 1);
+	px.gauge("obserwrt_device_attached", "Attached netdev (1 if attached).",
+		 obserwrt::PromExposition::labels({{"ifname", "awg\"x"}}), 1);
+
+	const std::string s = px.str();
+
+	/* # HELP/# TYPE emitted exactly once per family. */
+	CHECK_EQ(count_occ(s, "# TYPE obserwrt_flows_exported_total counter\n"), (size_t)1);
+	CHECK_EQ(count_occ(s, "# TYPE obserwrt_build_info gauge\n"), (size_t)1);
+	CHECK_EQ(count_occ(s, "obserwrt_flows_exported_total 4\n"), (size_t)1);
+	CHECK_EQ(count_occ(s, "obserwrt_flows_exported_total 5\n"), (size_t)1);
+
+	/* labels: rendering + escaping of " in values. */
+	CHECK(s.find("obserwrt_build_info{version=\"1.0\",commit=\"\"} 1\n") != std::string::npos);
+	CHECK(s.find("obserwrt_device_attached{ifname=\"awg\\\"x\"} 1\n") != std::string::npos);
+
+	/* empty label list -> bare sample, no braces. */
+	CHECK(s.find("obserwrt_flows_exported_total 4") != std::string::npos);
+	CHECK(s.find("obserwrt_flows_exported_total{} 4") == std::string::npos);
+
+	/* header/encounter order preserved. */
+	CHECK(s.find("obserwrt_flows_exported_total counter") <
+	      s.find("obserwrt_build_info{version"));
+}
+
 int main()
 {
 	test_ipfix_wire();
@@ -517,6 +562,7 @@ int main()
 	test_lifecycle_delta();
 	test_syslog_export();
 	test_config_mini();
+	test_prometheus();
 
 	if (g_failures != 0) {
 		std::fprintf(stderr, "harness: %d failures\n", g_failures);
