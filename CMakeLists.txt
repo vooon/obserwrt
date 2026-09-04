@@ -62,18 +62,34 @@ set(OBSEWRRT_CXX_FLAGS -Wall -Wextra -Wpedantic -Werror
 
 # ---------------- core library (shared by daemon + harness) ----------------
 
+# Config backend: libuci on OpenWrt, vendored inifile-cpp on plain Linux.
+if(OBSEWRRT_USE_LIBUCI)
+  set(OBSEWRRT_CONFIG_SRC src/config_luci.cpp)
+else()
+  set(OBSEWRRT_CONFIG_SRC src/config_mini.cpp)
+endif()
+
 add_library(obserwrt_core OBJECT
   src/cli.cpp
   src/exporter_ipfix.cpp
-  src/config_mini.cpp
+  ${OBSEWRRT_CONFIG_SRC}
+  src/exporter_syslog.cpp
   src/lifecycle.cpp
   src/metrics.cpp)
 
 target_include_directories(obserwrt_core PUBLIC src)
 # Vendored inifile-cpp on the SYSTEM include path: compilers and clang-tidy
-# treat it as third-party code, not project code.
-target_include_directories(obserwrt_core SYSTEM PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/vendor)
+# Config backends: vendored inifile-cpp as a system include with -fexceptions
+# on that TU only (the library throws); the libuci backend is exception-free.
+if(OBSEWRRT_USE_LIBUCI)
+  target_link_libraries(obserwrt_core PUBLIC uci)
+else()
+  target_include_directories(obserwrt_core SYSTEM PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/vendor)
+  # inifile-cpp throws; keep -fexceptions contained to its TU only.
+  set_source_files_properties(src/config_mini.cpp PROPERTIES
+    COMPILE_OPTIONS "-fexceptions")
+endif()
 target_compile_definitions(obserwrt_core PUBLIC
   OBSEWRRT_VERSION="${PROJECT_VERSION}"
   OBSEWRRT_COMMIT="${OBSEWRRT_COMMIT}"
@@ -83,10 +99,6 @@ target_compile_definitions(obserwrt_core PUBLIC
   OBSEWRRT_DEFAULT_BPF_OBJ="${OBSEWRRT_DEFAULT_BPF_OBJ}")
 target_compile_options(obserwrt_core PRIVATE ${OBSEWRRT_CXX_FLAGS})
 set_target_properties(obserwrt_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
-
-# inifile-cpp is exception-based; keep -fexceptions contained to its TU only.
-set_source_files_properties(src/config_mini.cpp PROPERTIES
-  COMPILE_OPTIONS "-fexceptions")
 
 # ---------------- daemon ----------------
 

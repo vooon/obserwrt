@@ -7,6 +7,7 @@
  * service structure and lifecycle/export plumbing run end-to-end.
  */
 
+#include <syslog.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -17,6 +18,7 @@
 #include "cli.hpp"
 #include "config.hpp"
 #include "exporter_ipfix.hpp"
+#include "exporter_syslog.hpp"
 #include "lifecycle.hpp"
 #include "metrics.hpp"
 
@@ -77,8 +79,16 @@ int main(int argc, char **argv)
 	metrics.init(cfg);
 
 	obserwrt::IpfixExporter ipfix(cfg.ipfix.obs_domain);
+	obserwrt::SyslogExporter syslog;
 	obserwrt::Lifecycle lifecycle(cfg.timeouts);
 	EmptyMap map;
+
+	std::string syslog_err;
+	const bool syslog_active = syslog.init(cfg.syslog, &syslog_err);
+	if (!syslog_err.empty())
+		std::fprintf(stderr, "obserwrt: syslog: %s\n", syslog_err.c_str());
+	if (cfg.ipfix.enabled)
+		openlog("obserwrt", LOG_PID, LOG_DAEMON);
 
 	const uint32_t start_s = static_cast<uint32_t>(time(nullptr));
 	/* Monotonic -> epoch offset so exporters can convert flow timestamps
@@ -88,11 +98,16 @@ int main(int argc, char **argv)
 	if (cfg.ipfix.enabled)
 		ipfix.send_templates(start_s);
 
-	std::fprintf(stderr,
-		     "obserwrt: started (config %s, bpf %s, devices %zu, ipfix %s, metrics %s)\n",
-		     config_path.c_str(), bpf_object.c_str(), cfg.devices.size(),
-		     cfg.ipfix.enabled ? "on" : "off",
-		     metrics.active() ? cfg.prometheus_textfile.c_str() : "off");
+	if (!cfg.ipfix.enabled && !syslog_active)
+		std::fprintf(stderr,
+			     "obserwrt: no exporters enabled; observations will not be exported\n");
+
+	std::fprintf(
+	    stderr,
+	    "obserwrt: started (config %s, bpf %s, devices %zu, ipfix %s, syslog %s, metrics %s)\n",
+	    config_path.c_str(), bpf_object.c_str(), cfg.devices.size(),
+	    cfg.ipfix.enabled ? "on" : "off", syslog_active ? "on" : "off",
+	    metrics.active() ? cfg.prometheus_textfile.c_str() : "off");
 
 	unsigned metric_tick = 0;
 	const uint32_t lidx = cfg.prometheus_interval > 0 ? cfg.prometheus_interval : 20;
@@ -103,10 +118,12 @@ int main(int argc, char **argv)
 		const uint32_t now_s = static_cast<uint32_t>(time(nullptr));
 		const obserwrt::Lifecycle::Stats n =
 		    lifecycle.run(map, [&](const obserwrt::FlowKey &k, const obserwrt::FlowValue &v,
-					   bool, const obserwrt::Delta &delta) {
+					   bool expired, const obserwrt::Delta &delta) {
 			    metrics.observe();
 			    if (cfg.ipfix.enabled)
 				    ipfix.emit(k, v, &delta);
+			    if (syslog_active)
+				    syslog.emit(k, v, expired, &delta);
 		    });
 
 		if (cfg.ipfix.enabled)

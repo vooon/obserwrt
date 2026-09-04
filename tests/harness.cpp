@@ -19,7 +19,9 @@
 #include <string>
 #include <vector>
 
+#include "config.hpp"
 #include "exporter_ipfix.hpp"
+#include "exporter_syslog.hpp"
 #include "flow.hpp"
 #include "lifecycle.hpp"
 
@@ -405,11 +407,116 @@ static void test_lifecycle_delta()
 	CHECK(map.m.empty());
 }
 
+/* ---------- 02_syslog (pinned ucode tests) + config_mini ---------- */
+
+static void test_syslog_export()
+{
+	/* IPv4 TCP egress ifindex 30 - mirrors 02_syslog/01_local_json. */
+	FK k{};
+	k.ifindex = 30;
+	k.direction = obserwrt::EGRESS;
+	k.family = 4;
+	k.protocol = 6;
+	std::memcpy(k.src, v4in6(192, 0, 2, 10).data(), 16);
+	std::memcpy(k.dst, v4in6(198, 51, 100, 20).data(), 16);
+	k.sport = 49152;
+	k.dport = 443;
+
+	FV v{};
+	v.packets = 2;
+	v.bytes = 128;
+	v.first_seen = 10;
+	v.last_seen = 20;
+	v.tcp_flags = 2;
+
+	const std::string js = obserwrt::SyslogExporter::encode_json(k, v, true, nullptr, "30");
+	CHECK(js.find("\"ifname\":\"30\"") != std::string::npos);
+	CHECK(js.find("\"src\":\"192.0.2.10\"") != std::string::npos);
+	CHECK(js.find("\"dst\":\"198.51.100.20\"") != std::string::npos);
+	CHECK(js.find("\"expired\":true") != std::string::npos);
+	CHECK(js.find("\"packets\":2") != std::string::npos);
+
+	/* IPv6 UDP ingress - mirrors 02_syslog/02_remote_logfmt. */
+	uint8_t s1[16] = {0};
+	uint8_t s2[16] = {0};
+	FK k6{};
+	k6.ifindex = 30;
+	k6.direction = obserwrt::INGRESS;
+	k6.family = 6;
+	k6.protocol = 17;
+	s1[0] = 0x20;
+	s1[1] = 0x01;
+	s1[2] = 0x0d;
+	s1[3] = 0xb8;
+	s2[0] = 0x20;
+	s2[1] = 0x01;
+	s2[2] = 0x0d;
+	s2[3] = 0xb8;
+	s1[15] = 1;
+	s2[15] = 2;
+	std::memcpy(k6.src, s1, 16);
+	std::memcpy(k6.dst, s2, 16);
+	k6.sport = 53;
+	k6.dport = 443;
+
+	FV v6{};
+	v6.packets = 1;
+	v6.bytes = 64;
+	v6.first_seen = 30;
+	v6.last_seen = 40;
+
+	const std::string lf =
+	    obserwrt::SyslogExporter::encode_logfmt(k6, v6, false, nullptr, "30");
+	CHECK(lf.find("ifname=\"30\"") != std::string::npos);
+	CHECK(lf.find("src=\"2001:db8::1\"") != std::string::npos);
+	CHECK(lf.find("dst=\"2001:db8::2\"") != std::string::npos);
+	CHECK(lf.find("expired=0") != std::string::npos);
+
+	/* RFC 5424 envelope. */
+	const std::string fr = obserwrt::SyslogExporter::frame(lf, "probe-awg0", 1700000000);
+	CHECK(fr.find("<134>1 ") == 0);
+	CHECK(fr.find("probe-awg0 obserwrt - - - ") != std::string::npos);
+	CHECK(fr.find("Z ") != std::string::npos); /* RFC3339 timestamp */
+}
+
+static void test_config_mini()
+{
+	const std::string text = "[main]\n"
+				 "device = awg* br-lan\n"
+				 "tcp_timeout = 300\n"
+				 "max_flows = 8192\n"
+				 "[ipfix]\n"
+				 "enabled = true\n"
+				 "collector_host = 192.0.2.10\n"
+				 "collector_port = 4739\n"
+				 "observation_domain = 7\n";
+
+	std::string err;
+	const obserwrt::Config c = obserwrt::load_config_string(text, &err);
+	CHECK(err.empty());
+	CHECK_EQ(c.devices.size(), (size_t)2);
+	CHECK(c.devices[0] == "awg*");
+	CHECK(c.devices[1] == "br-lan");
+	CHECK_EQ(c.timeouts.tcp, (uint64_t)300);
+	CHECK_EQ(c.max_flows, (uint32_t)8192);
+	CHECK(c.ipfix.enabled);
+	CHECK(c.ipfix.collector_host == "192.0.2.10");
+	CHECK_EQ(c.ipfix.collector_port, (uint16_t)4739);
+	CHECK_EQ(c.ipfix.obs_domain, (uint32_t)7);
+
+	/* enabled but no collector -> fatal config error. */
+	const obserwrt::Config bad =
+	    obserwrt::load_config_string("[ipfix]\nenabled = true\n", &err);
+	CHECK(!err.empty());
+}
+
 int main()
 {
 	test_ipfix_wire();
 	test_key_value_layouts();
 	test_lifecycle_delta();
+	test_syslog_export();
+	test_config_mini();
 
 	if (g_failures != 0) {
 		std::fprintf(stderr, "harness: %d failures\n", g_failures);

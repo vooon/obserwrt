@@ -111,8 +111,15 @@ Config parse(ini::IniFile &ini)
 	cfg.syslog.syslog_host = std::string(field(ini, "syslog", "syslog_host"));
 	cfg.syslog.syslog_port = static_cast<uint16_t>(
 	    parse_uint(ini, "syslog", "syslog_port", 514, 65535, "syslog_port"));
-	cfg.syslog.protocol = std::string(field(ini, "syslog", "protocol"));
-	cfg.syslog.format = std::string(field(ini, "syslog", "format"));
+	/* Keep the struct defaults when an option is absent (empty string). */
+	{
+		const std::string_view p = field(ini, "syslog", "protocol");
+		cfg.syslog.protocol = p.empty() ? "udp" : std::string(p);
+	}
+	{
+		const std::string_view f = field(ini, "syslog", "format");
+		cfg.syslog.format = f.empty() ? "json" : std::string(f);
+	}
 	cfg.syslog.hostname = std::string(field(ini, "syslog", "hostname"));
 	cfg.syslog.source_address = std::string(field(ini, "syslog", "source_address"));
 

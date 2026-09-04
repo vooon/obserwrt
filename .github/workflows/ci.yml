@@ -138,8 +138,12 @@ jobs:
           cmake -S . -B build-tidy -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
           cmake --build build-tidy -j2
+          # Only the sources actually in this configuration's compile DB
+          # (config_luci.cpp is OpenWrt-only and absent on the host).
+          files=$(jq -r '.[].file' build-tidy/compile_commands.json \
+            | grep '/src/')
+          test -n "$files"
           checks="-checks=-*,clang-analyzer-*,bugprone-*,-bugprone-easily-swappable-parameters,performance-*"
-          files=$(find src -name '*.cpp' | grep -v vendor)
           clang-tidy -p build-tidy --warnings-as-errors='*' \
             --checks "$checks" $files
 
