@@ -1,7 +1,7 @@
 /*
  * obserwrt - configuration backend for plain Linux (config_mini.cpp)
  *
- * Uses vendored inifile-cpp (src/vendor/inifile, MIT). The library is
+ * Uses vendored inifile-cpp (vendor/inifile.hpp, MIT). The library is
  * exception-based, so this TU is compiled with -fexceptions; parse errors are
  * caught at the load boundary and surfaced as std::runtime_error. A missing
  * path yields defaults (matches "startup with zero matching devices is a
@@ -23,9 +23,9 @@
 
 #include "config.hpp"
 
-/* Vendored inifile-cpp (src/vendor/inifile, MIT); the include dir is a system
+/* Vendored inifile-cpp (vendor/inifile.hpp, MIT); the vendor dir is a system
  * include so neither the compiler nor clang-tidy treats it as project code. */
-#include <inicpp.h>
+#include <inifile.hpp>
 
 namespace obserwrt
 {

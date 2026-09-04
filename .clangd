@@ -4,4 +4,4 @@ CompileFlags:
   Add:
     - -std=c++23
     - -I${workspaceRoot}/src
-    - -I${workspaceRoot}/src/vendor/inifile
+    - -I${workspaceRoot}/vendor

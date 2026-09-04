@@ -23,6 +23,7 @@ define Build/Prepare
 	mkdir -p $(PKG_BUILD_DIR)
 	$(CP) ../CMakeLists.txt $(PKG_BUILD_DIR)/
 	$(CP) -r ../src $(PKG_BUILD_DIR)/
+	$(CP) -r ../vendor $(PKG_BUILD_DIR)/
 endef
 
 # Optimization follows the image (CONFIG_TARGET_OPTIMIZATION is already in

@@ -73,7 +73,7 @@ target_include_directories(obserwrt_core PUBLIC src)
 # Vendored inifile-cpp on the SYSTEM include path: compilers and clang-tidy
 # treat it as third-party code, not project code.
 target_include_directories(obserwrt_core SYSTEM PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/vendor/inifile)
+  ${CMAKE_CURRENT_SOURCE_DIR}/vendor)
 target_compile_definitions(obserwrt_core PUBLIC
   OBSEWRRT_VERSION="${PROJECT_VERSION}"
   OBSEWRRT_COMMIT="${OBSEWRRT_COMMIT}"
