@@ -113,6 +113,41 @@ target_compile_options(obserwrt PRIVATE ${OBSEWRRT_CXX_FLAGS})
 
 install(TARGETS obserwrt RUNTIME DESTINATION bin)
 
+# ---------------- eBPF object (plain-Linux packages) ----------------
+# OpenWrt builds the .o via bpf.mk; on Linux the package must contain it at
+# the daemon's default path (/usr/lib/obserwrt/obserwrt-bpf.o). Build from
+# source with clang (same include shim the CI smoke uses).
+if(NOT OBSEWRRT_USE_LIBUCI)
+  option(OBSEWRRT_BUILD_BPF "Build obserwrt-bpf.o for the Linux packages" ON)
+  if(OBSEWRRT_BUILD_BPF)
+    find_program(BPF_CLANG clang)
+    if(BPF_CLANG)
+      set(BPF_SHIM ${CMAKE_BINARY_DIR}/bpf-uapi)
+      set(BPF_OBJECT ${CMAKE_BINARY_DIR}/obserwrt-bpf.o)
+      set(BPF_INCS
+        -I${BPF_SHIM}
+        -I/usr/include
+        -target bpfel)
+      if(CMAKE_LIBRARY_ARCHITECTURE)
+        list(APPEND BPF_INCS -I/usr/include/${CMAKE_LIBRARY_ARCHITECTURE})
+      endif()
+      add_custom_command(OUTPUT ${BPF_OBJECT}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${BPF_SHIM}/uapi
+        COMMAND ${CMAKE_COMMAND} -E create_symlink /usr/include/linux
+          ${BPF_SHIM}/uapi/linux
+        COMMAND ${BPF_CLANG} -O2 -g ${BPF_INCS}
+          -c ${CMAKE_CURRENT_SOURCE_DIR}/obserwrt/src/obserwrt-bpf.c
+          -o ${BPF_OBJECT}
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/obserwrt/src/obserwrt-bpf.c
+        COMMENT "Building obserwrt-bpf.o")
+      add_custom_target(obserwrt_bpf_o ALL DEPENDS ${BPF_OBJECT})
+      install(FILES ${BPF_OBJECT} DESTINATION lib/obserwrt)
+    else()
+      message(WARNING "clang not found; obserwrt-bpf.o will not be built")
+    endif()
+  endif()
+endif()
+
 # Plain-Linux visibility: config sample + systemd unit (OpenWrt installs the
 # UCI config + procd init from obserwrt/files/ via its own Makefile).
 if(NOT OBSEWRRT_USE_LIBUCI)
