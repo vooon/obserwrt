@@ -5,7 +5,7 @@
 #     CPack DEB optional (-DOBSEWRRT_ENABLE_CPACK=ON)
 #   - OpenWrt (via $(INCLUDE_DIR)/cmake.mk): -DOBSEWRRT_USE_LIBUCI=ON
 #     -DOBSEWRRT_OS=openwrt -DOBSEWRRT_ARCH=<arch> -DOBSEWRRT_VERSION=<pkgver>
-#     (config_luci.cpp lands together with the libuci wiring)
+#     (config_uci.cpp lands together with the libuci wiring)
 cmake_minimum_required(VERSION 3.20)
 
 # Version tracks PKG_VERSION; the maintainer bumps to 1.0.0 deliberately
@@ -22,12 +22,18 @@ option(OBSEWRRT_USE_LIBUCI "Build with the OpenWrt libuci config backend" OFF)
 option(OBSEWRRT_ENABLE_CPACK "Enable CPack .deb packaging (plain Linux)" OFF)
 option(OBSEWRRT_BUILD_TESTS "Build the golden-vector harness" ON)
 
-# Optimization follows the toolchain preferences. OpenWrt injects the image
-# flags via cmake.mk; Linux release defaults to -O2 (x86_64 fleet).
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
-set(CMAKE_CXX_FLAGS_RELEASE "-O2 -DNDEBUG")
+
+# Optimization follows the toolchain preferences. OpenWrt (OBSEWRRT_USE_LIBUCI)
+# injects the image flags via cmake.mk's CXXFLAGS and passes an empty
+# -DCMAKE_CXX_FLAGS_RELEASE, so it stays authoritative; plain-Linux Release
+# defaults to -O2. Do not set per-config flags on the OpenWrt path - the
+# default per-config -O3 would override the image's -Os/-O2.
+if(NOT OBSEWRRT_USE_LIBUCI)
+  set(CMAKE_CXX_FLAGS_RELEASE "-O2 -DNDEBUG")
+endif()
 
 # Platform identity for build_info / defaults.
 if(OBSEWRRT_USE_LIBUCI)
@@ -57,14 +63,14 @@ else()
   set(OBSEWRRT_COMMIT "")
 endif()
 
-set(OBSEWRRT_CXX_FLAGS -Wall -Wextra -Wpedantic -Werror
+set(OBSEWRRT_CXX_FLAGS -Wall -Wextra -Werror
     -fno-exceptions -fno-rtti -fno-threadsafe-statics)
 
 # ---------------- core library (shared by daemon + harness) ----------------
 
 # Config backend: libuci on OpenWrt, vendored inifile-cpp on plain Linux.
 if(OBSEWRRT_USE_LIBUCI)
-  set(OBSEWRRT_CONFIG_SRC src/config_luci.cpp)
+  set(OBSEWRRT_CONFIG_SRC src/config_uci.cpp)
 else()
   set(OBSEWRRT_CONFIG_SRC src/config_mini.cpp)
 endif()

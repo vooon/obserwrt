@@ -2,7 +2,7 @@
  * obserwrt - configuration facade (config.hpp)
  *
  * Single Config struct reads by two backend implementations:
- *   - config_luci.cpp (OpenWrt, OBSERWRT_USE_LIBUCI): /etc/config/obserwrt
+ *   - config_uci.cpp (OpenWrt, OBSEWRRT_USE_LIBUCI): /etc/config/obserwrt
  *   - config_mini.cpp (plain Linux): vendored inifile-cpp, /etc/obserwrt.conf
  * The rest of the daemon only sees the Config struct.
  */

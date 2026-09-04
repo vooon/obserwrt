@@ -1,5 +1,5 @@
 /*
- * obserwrt - configuration backend for OpenWrt (config_luci.cpp)
+ * obserwrt - configuration backend for OpenWrt (config_uci.cpp)
  *
  * Reads the "obserwrt" UCI package (/etc/config/obserwrt) via libuci into the
  * Config facade. No exceptions (matches the -fno-exceptions build); failures
