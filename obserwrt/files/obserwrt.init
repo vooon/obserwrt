@@ -9,17 +9,13 @@ STOP=98
 start_service()
 {
 	procd_open_instance
-	procd_set_param command /usr/bin/ucode \
-		/usr/share/ucode/obserwrt/obserwrt.uc
+	procd_set_param command /usr/bin/obserwrt
 	procd_set_param env BPF_OBJ=/lib/bpf/obserwrt-bpf.o
 	procd_set_param respawn 3600 5 5
 	procd_close_instance
 }
 
-# Reload on /etc/config/obserwrt changes (procd_add_reload_trigger + default
-# reload re-emit the instance config, which does NOT restart the process - and
-# obserwrt only reads its config at startup - so explicit stop+start is what
-# actually applies changes).
+# Reload on /etc/config/obserwrt changes (config read at startup only).
 reload_service()
 {
 	stop

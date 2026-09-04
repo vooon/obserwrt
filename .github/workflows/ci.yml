@@ -35,10 +35,10 @@ jobs:
             make
 
       - name: Shellcheck init script
-        if: ${{ hashFiles('obserwrt/files/etc/init.d/obserwrt') != '' }}
+        if: ${{ hashFiles('obserwrt/files/obserwrt.init') != '' }}
         run: |
           set -euo pipefail
-          shellcheck obserwrt/files/etc/init.d/obserwrt
+          shellcheck obserwrt/files/obserwrt.init
 
       - name: Lint ucode modules (node ESM parse + ucode rules)
         # ucode is ECMAScript-based; node's parser catches syntax, plus a couple
@@ -101,6 +101,47 @@ jobs:
             -c obserwrt/src/obserwrt-bpf.c -o "$out/obserwrt-bpfel.o"
           clang -O2 -g -target bpfeb $inc \
             -c obserwrt/src/obserwrt-bpf.c -o "$out/obserwrt-bpfeb.o"
+
+  native:
+    name: Native C++ build, golden harness, linters
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            g++ cmake make clang-format clang-tidy
+
+      - name: Configure + build (-Werror)
+        run: |
+          set -euo pipefail
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j2
+
+      - name: Golden-vector harness
+        run: |
+          set -euo pipefail
+          ctest --test-dir build --output-on-failure
+
+      - name: clang-format check (our sources, not the vendored inifile)
+        run: |
+          set -euo pipefail
+          files=$(find src tests -name '*.cpp' -o -name '*.hpp' | grep -v vendor)
+          test -n "$files"
+          clang-format --dry-run --Werror $files
+
+      - name: clang-tidy (compile DB, curated checks)
+        run: |
+          set -euo pipefail
+          cmake -S . -B build-tidy -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          cmake --build build-tidy -j2
+          checks="-checks=-*,clang-analyzer-*,bugprone-*,-bugprone-easily-swappable-parameters,performance-*"
+          files=$(find src -name '*.cpp' | grep -v vendor)
+          clang-tidy -p build-tidy --warning-as-errors='*' \
+            --checks "$checks" $files
 
   feed-health:
     name: Feed registration check

@@ -10,8 +10,36 @@ permissions:
   contents: write
 
 jobs:
+  build-deb:
+    name: Build amd64 .deb (Debian 13)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build .deb inside debian:13 (pinned trixie ABI)
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD:/src" -w /src debian:13 bash -c '
+            set -euo pipefail
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq
+            apt-get install -y -qq --no-install-recommends cmake g++ make
+            cmake -S . -B build-deb -DCMAKE_BUILD_TYPE=Release \
+              -DOBSEWRRT_ENABLE_CPACK=ON -DOBSEWRRT_BUILD_TESTS=OFF
+            cmake --build build-deb -j"$(nproc)"
+            cpack -B build-deb --config build-deb/CPackConfig.cmake -G DEB
+          '
+
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb
+          path: build-deb/*.deb
+          if-no-files-found: error
+
   release:
     name: Create GitHub Release
+    needs: build-deb
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -19,9 +47,16 @@ jobs:
       - name: Sanity lint
         run: node scripts/uc-lint.mjs
 
-      - name: Create GitHub Release
+      - name: Download .deb
+        uses: actions/download-artifact@v4
+        with:
+          name: deb
+          path: ./deb
+
+      - name: Create GitHub Release with .deb
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
           name: obserwrt ${{ github.ref_name }}
           generate_release_notes: true
+          files: ./deb/*.deb
