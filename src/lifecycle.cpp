@@ -58,6 +58,8 @@ Lifecycle::Stats Lifecycle::run(FlowMap &map, const Exporter &exporter)
 	Stats n;
 	std::unordered_set<std::string> seen;
 
+	map.reset(); /* re-snapshot current keys (libbpf batch-walk semantics) */
+
 	std::string key;
 	std::string raw;
 

@@ -16,9 +16,11 @@
  *            source_address
  */
 
+#include <charconv>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include "config.hpp"
@@ -58,17 +60,17 @@ uint64_t parse_uint(ini::IniFile &ini, const char *sec, const char *key, uint64_
 		return def;
 
 	uint64_t v = 0;
-	for (char c : s) {
-		if (c < '0' || c > '9') {
-			std::string msg(label);
-			msg += ": invalid value: ";
-			msg += s;
-			throw std::runtime_error(msg);
-		}
-		v = v * 10 + static_cast<uint64_t>(c - '0');
-		if (v > hi)
-			throw std::runtime_error(label + ": out of range");
+	const char *first = s.data();
+	const char *last = first + s.size();
+	const auto [ptr, ec] = std::from_chars(first, last, v);
+	if (ec != std::errc() || ptr != last) {
+		std::string msg(label);
+		msg += ": invalid value: ";
+		msg += s;
+		throw std::runtime_error(msg);
 	}
+	if (v > hi)
+		throw std::runtime_error(label + ": out of range");
 	return v;
 }
 

@@ -11,6 +11,7 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -22,10 +23,12 @@ struct bpf_map;
 struct bpf_program;
 struct bpf_link;
 
-namespace obserwrt {
+namespace obserwrt
+{
 
-class Bpf {
-public:
+class Bpf
+{
+      public:
 	Bpf() = default;
 	~Bpf();
 	Bpf(const Bpf &) = delete;
@@ -35,7 +38,10 @@ public:
 	 * (`max_flows` == 0 keeps the baked-in default) and load. */
 	bool load(const std::string &object_path, uint32_t max_flows, std::string *err);
 
-	bool loaded() const { return obj_ != nullptr; }
+	bool loaded() const
+	{
+		return obj_ != nullptr;
+	}
 
 	/* TC ingress+egress attach on a device incarnation (real ifindex).
 	 * Idempotent; keeps the tcx links until detach(). */
@@ -50,12 +56,15 @@ public:
 	void purge_ifindex(uint32_t ifindex);
 
 	/* Self-observability. */
-	uint32_t map_limit() const;                 /* bpf_map_info.max_entries */
-	void bpf_stats(uint64_t out[4]) const;      /* packets, bytes, flows_created, parsed */
+	uint32_t map_limit() const;	       /* bpf_map_info.max_entries */
+	void bpf_stats(uint64_t out[4]) const; /* packets, bytes, flows_created, parsed */
 
-	const std::string &last_error() const { return last_error_; }
+	const std::string &last_error() const
+	{
+		return last_error_;
+	}
 
-private:
+      private:
 	struct Links {
 		bpf_link *in = nullptr;
 		bpf_link *eg = nullptr;
@@ -66,23 +75,26 @@ private:
 	bpf_map *stats_ = nullptr;
 	bpf_program *prog_ingress_ = nullptr;
 	bpf_program *prog_egress_ = nullptr;
-	std::vector<Links> atts_; /* index == ifindex */
+	std::map<uint32_t, Links> atts_; /* ifindex -> live tcx links */
 	std::string last_error_;
 };
 
 /* FlowMap adapter over a loaded Bpf: snapshots the current keys per pass
  * (the libbpf walk semantics the lifecycle/harness MemMap mirror), then
  * get/delete per key so in-pass removal is safe. */
-class BpfFlowMap : public FlowMap {
-public:
-	explicit BpfFlowMap(const Bpf *b) : b_(b) {}
+class BpfFlowMap : public FlowMap
+{
+      public:
+	explicit BpfFlowMap(const Bpf *b) : b_(b)
+	{
+	}
 
 	void reset() override;
 	bool next_key(std::string &key) override;
 	bool get(const std::string &key, std::string &value) override;
 	bool delete_key(const std::string &key) override;
 
-private:
+      private:
 	const Bpf *b_;
 	std::vector<std::string> snapshot_;
 	size_t pos_ = 0;

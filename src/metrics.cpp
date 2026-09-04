@@ -75,6 +75,13 @@ void Metrics::set_bpf(unsigned long long packets, unsigned long long bytes,
 	bpf_flows_created_ = flows_created;
 }
 
+void Metrics::set_map_limit(uint32_t limit)
+{
+	if (!active_)
+		return;
+	map_limit_ = limit;
+}
+
 void Metrics::write()
 {
 	if (!active_)
@@ -119,6 +126,8 @@ void Metrics::write()
 	prom_line(out, "obserwrt_flows_active", "", std::to_string(flows_active_).c_str());
 	out += "# TYPE obserwrt_bpf_map_entries gauge\n";
 	prom_line(out, "obserwrt_bpf_map_entries", "", std::to_string(map_entries_).c_str());
+	out += "# TYPE obserwrt_bpf_map_limit gauge\n";
+	prom_line(out, "obserwrt_bpf_map_limit", "", std::to_string(map_limit_).c_str());
 	out += "# TYPE obserwrt_devices_attached gauge\n";
 	prom_line(out, "obserwrt_devices_attached", "", std::to_string(devices_.size()).c_str());
 	out += "# TYPE obserwrt_device_attached gauge\n";

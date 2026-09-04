@@ -15,9 +15,11 @@
 
 #include <unistd.h>
 
+#include <charconv>
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include "config.hpp"
@@ -86,19 +88,17 @@ bool parse_uint(uci_context *ctx, uci_section *s, const char *k, uint64_t def, u
 		return true;
 
 	uint64_t r = 0;
-	for (const char *p = v; *p; p++) {
-		if (*p < '0' || *p > '9') {
-			if (err) {
-				*err = label + ": invalid value: " + v;
-			}
-			return false;
-		}
-		r = r * 10 + static_cast<uint64_t>(*p - '0');
-		if (r > hi) {
-			if (err)
-				*err = label + ": out of range";
-			return false;
-		}
+	const char *last = v + std::strlen(v);
+	const auto [ptr, ec] = std::from_chars(v, last, r);
+	if (ec != std::errc() || ptr != last) {
+		if (err)
+			*err = label + ": invalid value: " + v;
+		return false;
+	}
+	if (r > hi) {
+		if (err)
+			*err = label + ": out of range";
+		return false;
 	}
 	out = r;
 	return true;
@@ -136,7 +136,7 @@ void fill(struct uci_context *ctx, const std::string &target, Config &cfg, std::
 		uci_err_label(rc, fatal);
 		if (fatal && err) {
 			*err = std::string("config: uci_load ") + target + ": " +
-			    uci_err_label(rc, fatal);
+			       uci_err_label(rc, fatal);
 		}
 		return;
 	}

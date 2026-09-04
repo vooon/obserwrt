@@ -70,12 +70,14 @@ else()
 endif()
 
 add_library(obserwrt_core OBJECT
+  src/bpf.cpp
   src/cli.cpp
   src/exporter_ipfix.cpp
   ${OBSEWRRT_CONFIG_SRC}
   src/exporter_syslog.cpp
   src/lifecycle.cpp
-  src/metrics.cpp)
+  src/metrics.cpp
+  src/reconcile.cpp)
 
 target_include_directories(obserwrt_core PUBLIC src)
 # Vendored third-party code (inifile-cpp, nlohmann/json) on the SYSTEM
@@ -84,13 +86,14 @@ target_include_directories(obserwrt_core SYSTEM PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/vendor)
 
 # Config backend: libuci is exception-free; inifile-cpp throws so its TU keeps
-# -fexceptions contained.
+# -fexceptions contained. libbpf is needed by both targets.
 if(OBSEWRRT_USE_LIBUCI)
   target_link_libraries(obserwrt_core PUBLIC uci)
 else()
   set_source_files_properties(src/config_mini.cpp PROPERTIES
     COMPILE_OPTIONS "-fexceptions")
 endif()
+target_link_libraries(obserwrt_core PUBLIC bpf)
 target_compile_definitions(obserwrt_core PUBLIC
   OBSEWRRT_VERSION="${PROJECT_VERSION}"
   OBSEWRRT_COMMIT="${OBSEWRRT_COMMIT}"

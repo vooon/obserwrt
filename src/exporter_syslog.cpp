@@ -158,8 +158,8 @@ bool SyslogExporter::connect_remote(const std::string &host, uint16_t port,
 		if (inet_pton(AF_INET, source_addr.c_str(), &src.sin_addr) != 1 ||
 		    bind(fd_, (struct sockaddr *)&src, sizeof(src)) < 0) {
 			if (error)
-				*error = "syslog: bind source " + source_addr + " failed: " +
-				    std::strerror(errno);
+				*error = "syslog: bind source " + source_addr +
+					 " failed: " + std::strerror(errno);
 			close(fd_);
 			fd_ = -1;
 			freeaddrinfo(res);
