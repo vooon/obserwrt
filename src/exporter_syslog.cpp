@@ -143,7 +143,8 @@ bool SyslogExporter::connect_remote(const std::string &host, uint16_t port,
 	char portbuf[8];
 	std::snprintf(portbuf, sizeof(portbuf), "%u", port);
 
-	struct addrinfo hints{};
+	struct addrinfo hints;
+	std::memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_DGRAM;
 
@@ -166,7 +167,8 @@ bool SyslogExporter::connect_remote(const std::string &host, uint16_t port,
 	}
 
 	if (!source_addr.empty()) {
-		struct sockaddr_in src{};
+		struct sockaddr_in src;
+		std::memset(&src, 0, sizeof(src));
 		src.sin_family = AF_INET;
 		src.sin_addr.s_addr = inet_addr(source_addr.c_str());
 		if (src.sin_addr.s_addr == INADDR_NONE ||
