@@ -145,7 +145,10 @@ int make_timer(uint32_t interval_s, std::string *err)
 void drain_timer(int fd)
 {
 	uint64_t exp;
-	read(fd, &exp, sizeof(exp));
+	/* timerfd read() carries warn_unused_result under _FORTIFY_SOURCE; the
+	 * value itself is irrelevant - we only need the fd drained. */
+	const ssize_t n = read(fd, &exp, sizeof(exp));
+	(void)n;
 }
 
 } /* namespace */
