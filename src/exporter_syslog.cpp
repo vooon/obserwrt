@@ -153,11 +153,17 @@ bool SyslogExporter::connect_remote(const std::string &host, uint16_t port,
 		struct sockaddr_in src;
 		std::memset(&src, 0, sizeof(src));
 		src.sin_family = AF_INET;
-		src.sin_addr.s_addr = inet_addr(source_addr.c_str());
-		if (src.sin_addr.s_addr == INADDR_NONE ||
+		/* inet_pton validates the literal; INADDR_NONE-style sentinels do not
+		 * catch e.g. "192.0.2." truncation. */
+		if (inet_pton(AF_INET, source_addr.c_str(), &src.sin_addr) != 1 ||
 		    bind(fd_, (struct sockaddr *)&src, sizeof(src)) < 0) {
 			if (error)
-				*error = "syslog: bind source " + source_addr + " failed";
+				*error = "syslog: bind source " + source_addr + " failed: " +
+				    std::strerror(errno);
+			close(fd_);
+			fd_ = -1;
+			freeaddrinfo(res);
+			return false;
 		}
 	}
 

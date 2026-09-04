@@ -23,9 +23,9 @@
 
 #include "config.hpp"
 
-/* Vendored inifile-cpp (vendor/inifile.hpp, MIT); the vendor dir is a system
+/* Vendored inifile-cpp (vendor/inifile/, MIT); the vendor dir is a system
  * include so neither the compiler nor clang-tidy treats it as project code. */
-#include <inifile.hpp>
+#include <inifile/inifile.hpp>
 
 namespace obserwrt
 {

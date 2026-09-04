@@ -38,6 +38,10 @@ class FlowMap
       public:
 	virtual ~FlowMap() = default;
 
+	/* Called before each pass so a map-backed iterator can re-snapshot the
+	 * current keys (like the libbpf batch walk). No-op for stateless maps. */
+	virtual void reset() {}
+
 	/* Next current key; false when iteration is exhausted. */
 	virtual bool next_key(std::string &key) = 0;
 

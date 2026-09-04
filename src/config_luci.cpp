@@ -28,6 +28,35 @@ namespace obserwrt
 namespace
 {
 
+/* libuci error -> short label (uci.h exposes no strerror) + a fatal flag.
+ * NOTFOUND (missing package/file) is the READY-defaults case, not an error. */
+const char *uci_err_label(int rc, bool &fatal)
+{
+	switch (rc) {
+	case UCI_ERR_NOTFOUND:
+		fatal = false; /* absent config -> defaults */
+		return "not found";
+	case UCI_ERR_MEM:
+		fatal = true;
+		return "out of memory";
+	case UCI_ERR_INVAL:
+		fatal = true;
+		return "invalid argument";
+	case UCI_ERR_IO:
+		fatal = true;
+		return "I/O error";
+	case UCI_ERR_PARSE:
+		fatal = true;
+		return "parse error";
+	case UCI_ERR_DUPLICATE:
+		fatal = true;
+		return "duplicate";
+	default:
+		fatal = true;
+		return "unknown error";
+	}
+}
+
 bool bool_option(const char *v, bool fallback)
 {
 	if (!v)
@@ -97,9 +126,20 @@ void fill(struct uci_context *ctx, const std::string &target, Config &cfg, std::
 {
 	struct uci_package *pkg = nullptr;
 	/* uci_load loads a file when `target` contains '/' (path), else a package
-	 * from the config dir. A missing package -> defaults. */
-	if (uci_load(ctx, target.c_str(), &pkg) != UCI_OK)
+	 * from the config dir. A missing package/file is the READY-defaults case
+	 * (startup with zero configured devices is success); parse, I/O and
+	 * permission failures are surfaced as fatal config errors so a broken
+	 * config doesn't silently start the daemon with defaults. */
+	int rc = uci_load(ctx, target.c_str(), &pkg);
+	if (rc != UCI_OK) {
+		bool fatal = true;
+		uci_err_label(rc, fatal);
+		if (fatal && err) {
+			*err = std::string("config: uci_load ") + target + ": " +
+			    uci_err_label(rc, fatal);
+		}
 		return;
+	}
 
 	struct uci_element *e;
 	uci_foreach_element(&pkg->sections, e)

@@ -16,14 +16,16 @@ include $(INCLUDE_DIR)/package.mk
 include $(INCLUDE_DIR)/cmake.mk
 include $(INCLUDE_DIR)/bpf.mk
 
-# Root CMakeLists.txt + sources live repo-root (feed root); assemble them into
-# the package build dir. The BPF object is built on-device-from-source via
-# bpf.mk (never checked in) - see Build/Compile below.
+# Root CMakeLists.txt + C++ sources live repo-root (feed root); the eBPF
+# source lives in the package dir (obserwrt/src/obserwrt-bpf.c). Assemble
+# both into the package build dir; the BPF object is built on-device-from-
+# source via bpf.mk (never checked in) - see Build/Compile below.
 define Build/Prepare
 	mkdir -p $(PKG_BUILD_DIR)
 	$(CP) ../CMakeLists.txt $(PKG_BUILD_DIR)/
 	$(CP) -r ../src $(PKG_BUILD_DIR)/
 	$(CP) -r ../vendor $(PKG_BUILD_DIR)/
+	$(CP) ./src/obserwrt-bpf.c $(PKG_BUILD_DIR)/obserwrt-bpf.c
 endef
 
 # Optimization follows the image (CONFIG_TARGET_OPTIMIZATION is already in
@@ -38,10 +40,10 @@ CMAKE_OPTIONS += \
 	-DCMAKE_CXX_FLAGS_RELEASE=""
 
 # The daemon is built by CMake (Build/Compile/Default); the eBPF object is
-# compiled from source by bpf.mk'CompileBPF.
+# compiled from source by bpf.mk's CompileBPF.
 define Build/Compile
 	$(call Build/Compile/Default)
-	$(call CompileBPF,$(PKG_BUILD_DIR)/src/obserwrt-bpf.c)
+	$(call CompileBPF,$(PKG_BUILD_DIR)/obserwrt-bpf.c)
 endef
 
 define Package/obserwrt
@@ -74,7 +76,7 @@ define Package/obserwrt/install
 		$(1)/etc/config \
 		$(1)/etc/init.d
 	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/bin/obserwrt $(1)/usr/bin/
-	$(INSTALL_DATA) $(PKG_BUILD_DIR)/src/obserwrt-bpf.o $(1)/lib/bpf/
+	$(INSTALL_DATA) $(PKG_BUILD_DIR)/obserwrt-bpf.o $(1)/lib/bpf/
 	$(INSTALL_BIN) ./files/obserwrt.init $(1)/etc/init.d/obserwrt
 	$(INSTALL_DATA) ./files/obserwrt.conf $(1)/etc/config/obserwrt
 endef
