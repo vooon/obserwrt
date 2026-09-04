@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=obserwrt
 PKG_VERSION:=0.2.6
-PKG_RELEASE:=1
+PKG_RELEASE:=100
 
 PKG_BUILD_DIR:=$(BUILD_DIR)/obserwrt-$(PKG_VERSION)
 PKG_BUILD_DEPENDS:=bpf-headers
@@ -40,10 +40,11 @@ CMAKE_OPTIONS += \
 	-DCMAKE_CXX_FLAGS_RELEASE=""
 
 # The daemon is built by CMake (Build/Compile/Default); the eBPF object is
-# compiled from source by bpf.mk's CompileBPF.
+# compiled from source by bpf.mk's CompileBPF (the Kconfig flow-map default is
+# baked in; runtime max_flows overrides it at load).
 define Build/Compile
 	$(call Build/Compile/Default)
-	$(call CompileBPF,$(PKG_BUILD_DIR)/obserwrt-bpf.c)
+	$(call CompileBPF,$(PKG_BUILD_DIR)/obserwrt-bpf.c,-DFLOW_MAP_ENTRIES=$(FLOW_MAP_ENTRIES))
 endef
 
 define Package/obserwrt

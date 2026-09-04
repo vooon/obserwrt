@@ -89,7 +89,18 @@ target_include_directories(obserwrt_core SYSTEM PRIVATE
 # Config backend: libuci is exception-free; inifile-cpp throws so its TU keeps
 # -fexceptions contained. libbpf is needed by both targets.
 if(OBSEWRRT_USE_LIBUCI)
-  target_link_libraries(obserwrt_core PUBLIC uci)
+  # On OpenWrt the staging include comes via cmake.mk's TARGET_CPPFLAGS; for
+  # plain host builds (and the release .deb) resolve them explicitly.
+  find_path(UCI_INCLUDE_DIR NAMES uci.h)
+  if(UCI_INCLUDE_DIR)
+    target_include_directories(obserwrt_core PUBLIC ${UCI_INCLUDE_DIR})
+  endif()
+  find_library(UCI_LIBRARY NAMES uci)
+  if(UCI_LIBRARY)
+    target_link_libraries(obserwrt_core PUBLIC ${UCI_LIBRARY})
+  else()
+    target_link_libraries(obserwrt_core PUBLIC uci)
+  endif()
 else()
   set_source_files_properties(src/config_mini.cpp PROPERTIES
     COMPILE_OPTIONS "-fexceptions")
