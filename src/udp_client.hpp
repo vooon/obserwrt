@@ -2,17 +2,21 @@
  * obserwrt - remote UDP endpoint (udp_client.hpp)
  *
  * The one place that turns a collector host:port into a sendable UDP socket.
+ * Exporters own a UdpClient (one per remote exporter) - there is no injected
+ * transport abstraction; tests capture datagrams inside the exporter instead.
  * Dual-stack: AF_UNSPEC resolution, a socket of the resolved family, optional
- * source bind matched to that family, sockaddr_storage for sendto. Used by
- * both the IPFIX exporter (daemon sink) and the remote syslog exporter, so
- * the resolve/create/bind/send logic lives in exactly one place.
+ * source bind matched to that family, sockaddr_storage for sendto. Failed
+ * sends are counted so the daemon can fold them into
+ * obserwrt_export_errors_total via take_failures().
  */
 
 #pragma once
 
 #include <sys/socket.h>
 
+#include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string>
 
 namespace obserwrt
@@ -36,14 +40,23 @@ class UdpClient
 		return fd_ >= 0;
 	}
 
-	/* Send one datagram; false on failure (errno preserved) so callers can
-	 * count/log lost records. */
-	bool send(const std::string &data) const;
+	/* Send one datagram; false on failure (errno preserved), counted so the
+	 * caller can fold it into the export error metric later. */
+	bool send(std::span<const std::byte> data);
+
+	/* Failed sends since the last take (for exporter metrics). */
+	unsigned long take_failures()
+	{
+		unsigned long n = failures_;
+		failures_ = 0;
+		return n;
+	}
 
       private:
 	int fd_ = -1;
 	struct sockaddr_storage to_ = {};
 	socklen_t tolen_ = 0;
+	unsigned long failures_ = 0;
 
 	bool bind_source(int family, const std::string &s, std::string &err);
 };

@@ -30,29 +30,29 @@ struct Timeouts {
 	uint64_t general = 10;
 };
 
-/* Abstraction over the BPF flow map (libbpf batch walk lands here later).
- * The daemon implements it against libbpf; the harness uses an in-memory
- * map. All buffers are raw map bytes (46B key / 40B value). */
+/* Abstraction over the BPF flow map (libbpf walk lands here). The daemon
+ * implements it against libbpf; the harness uses an in-memory map. Keys and
+ * values are the native §5 structs (flow.hpp) - the map layout IS the struct. */
 class FlowMap
 {
       public:
 	virtual ~FlowMap() = default;
 
 	/* Called before each pass so a map-backed iterator can re-snapshot the
-	 * current keys (like the libbpf batch walk). No-op for stateless maps. */
+	 * current keys (like the libbpf walk). No-op for stateless maps. */
 	virtual void reset()
 	{
 	}
 
 	/* Next current key; false when iteration is exhausted. */
-	virtual bool next_key(std::string &key) = 0;
+	virtual bool next_key(FlowKey &key) = 0;
 
 	/* Read the value for `key`. False = entry vanished between iteration and
 	 * read (LRU eviction under map pressure) - skip it. */
-	virtual bool get(const std::string &key, std::string &value) = 0;
+	virtual bool get(const FlowKey &key, FlowValue &value) = 0;
 
 	/* Delete the entry for `key` (expiry). */
-	virtual bool delete_key(const std::string &key) = 0;
+	virtual bool delete_key(const FlowKey &key) = 0;
 };
 
 class Lifecycle
@@ -88,10 +88,10 @@ class Lifecycle
 		uint64_t last_seen;
 	};
 
-	/* last-exported counters keyed by the hex of the raw map key (the 46-byte
-	 * key is mostly zeroes; hex keeps it a clean string key). Pruned each pass
-	 * so LRU-evicted/expired flows do not leak state. */
-	std::unordered_map<std::string, Last> last_;
+	/* last-exported counters keyed by the flow key (packed struct, hashed for
+	 * the unordered map). Pruned each pass so LRU-evicted/expired flows do not
+	 * leak state. */
+	std::unordered_map<FlowKey, Last, FlowKeyHash> last_;
 
 	uint64_t proto_timeout(uint8_t proto) const;
 };

@@ -128,17 +128,12 @@ int main(int argc, char **argv)
 	if (!syslog_err.empty())
 		DAEMON_LOG(LOG_WARNING, "syslog: %s", syslog_err.c_str());
 
-	obserwrt::UdpClient ipfix_udp;
 	if (cfg.ipfix.enabled) {
-		if (!ipfix_udp.connect(cfg.ipfix.collector_host, cfg.ipfix.collector_port,
-				       cfg.ipfix.source_address, &err)) {
+		if (!ipfix.connect(cfg.ipfix.collector_host, cfg.ipfix.collector_port,
+				   cfg.ipfix.source_address, &err)) {
 			DAEMON_LOG(LOG_ERR, "fatal: %s", err.c_str());
 			return 1;
 		}
-		ipfix.set_sink([&](const std::string &data) {
-			if (!ipfix_udp.send(data))
-				metrics.record_error(); /* obserwrt_export_errors_total */
-		});
 	}
 
 	const uint32_t start_s = static_cast<uint32_t>(time(nullptr));
@@ -310,6 +305,10 @@ int main(int argc, char **argv)
 				    });
 				if (cfg.ipfix.enabled)
 					ipfix.flush(now_s);
+				/* Fold transport send failures (counted in the exporters'
+				 * owned sockets) into obserwrt_export_errors_total. */
+				metrics.record_errors(ipfix.take_failures() +
+						      syslog.take_failures());
 				DAEMON_LOG(LOG_DEBUG, "pass active=%u expired=%u map=%u", st.active,
 					   st.expired, st.map);
 				metrics.set_state(st.active, st.map, attached_names);

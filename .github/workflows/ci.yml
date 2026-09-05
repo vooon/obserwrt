@@ -29,7 +29,6 @@ jobs:
             linux-libc-dev \
             shellcheck \
             cmake \
-            libjson-c-dev \
             pkg-config \
             gcc \
             make
@@ -40,48 +39,6 @@ jobs:
           set -euo pipefail
           shellcheck obserwrt/files/obserwrt.init
 
-      - name: Lint ucode modules (node ESM parse + ucode rules)
-        # ucode is ECMAScript-based; node's parser catches syntax, plus a couple
-        # of ucode-specific checks (trailing ';' on export function, no arr.push()).
-        if: ${{ hashFiles('obserwrt/files/usr/share/ucode/obserwrt/*.uc') != '' }}
-        run: |
-          node scripts/uc-lint.mjs
-
-      - uses: ./.github/actions/build-ucode
-        id: ucode
-        # Upstream ucode modules provide the real `struct` (mocklib mocks
-        # override socket/fs/log for the unit tests), needed for both -c and the
-        # unit suite. Only needs json-c, already installed above.
-
-      - name: Syntax-check ucode agent (ucode -c)
-        # Compile each module to bytecode without executing it. ucode resolves
-        # imports at compile time, but the OpenWrt modules (bpf/uci/ubus/uloop)
-        # are not in the upstream tree, so strip the import/export lines and
-        # prepend a stub header providing the referenced names.
-        if: ${{ hashFiles('obserwrt/files/usr/share/ucode/obserwrt/*.uc') != '' }}
-        run: |
-          set -euo pipefail
-          work="$(mktemp -d)"
-          for f in obserwrt/files/usr/share/ucode/obserwrt/*.uc; do
-            { cat obserwrt/tests/syntax-stub.uc
-              sed -e '/^import /d' -e 's/^export //' "$f"; } \
-              > "$work/$(basename "$f")"
-          done
-          for f in "$work"/*.uc; do
-            "${{ steps.ucode.outputs.bin }}" -c "$f"
-          done
-
-      - name: Run ucode unit tests (mocked modules)
-        # The fw4-style suite mocks socket/uci/log/bpf and takes the real
-        # struct + fs from UCODE_MODULES, so it runs on the host ucode with no
-        # OpenWrt target. Covers wire encoding, chunking, and the syslog sender.
-        if: ${{ hashFiles('obserwrt/tests/run_tests.sh') != '' }}
-        run: |
-          set -euo pipefail
-          UCODE_BIN="${{ steps.ucode.outputs.bin }}" \
-          UCODE_MODULES="${{ steps.ucode.outputs.mods }}" \
-            obserwrt/tests/run_tests.sh
-
       - name: Compile eBPF object (bpfel + bpfeb)
         # Clang cross-compiles the BPF C source for both target byte orders,
         # validating the parser, map defs and struct layout even before any
@@ -90,7 +47,7 @@ jobs:
         # The source uses the OpenWrt/bpf.mk include style (`<uapi/linux/bpf.h>`
         # + `<bpf/bpf_helpers.h>`), so we shim `uapi/linux` -> `/usr/include/linux`
         # and add the asm + libbpf paths from linux-libc-dev/libbpf-dev.
-        if: ${{ hashFiles('obserwrt/src/obserwrt-bpf.c') != '' }}
+        if: ${{ hashFiles('bpf/obserwrt-bpf.c') != '' }}
         run: |
           set -euo pipefail
           out="$(mktemp -d)"
@@ -98,9 +55,9 @@ jobs:
           ln -s /usr/include/linux "$out/uapi/linux"
           inc="-I$out -I/usr/include/x86_64-linux-gnu -I/usr/include"
           clang -O2 -g -target bpfel $inc \
-            -c obserwrt/src/obserwrt-bpf.c -o "$out/obserwrt-bpfel.o"
+            -c bpf/obserwrt-bpf.c -o "$out/obserwrt-bpfel.o"
           clang -O2 -g -target bpfeb $inc \
-            -c obserwrt/src/obserwrt-bpf.c -o "$out/obserwrt-bpfeb.o"
+            -c bpf/obserwrt-bpf.c -o "$out/obserwrt-bpfeb.o"
 
   native:
     name: Native C++ build, golden harness, linters
@@ -163,7 +120,7 @@ jobs:
           for dir in $(find . -mindepth 1 -maxdepth 1 -type d ! -name '.*'); do
             dir="${dir#./}"
             case "$dir" in
-              docs|scripts|src|tests|linux|vendor) continue ;;
+              bpf|docs|scripts|src|tests|linux|vendor) continue ;;
             esac
             if [ -d "$dir" ] && [ ! -f "$dir/Makefile" ]; then
               echo "::error::$dir/ exists but has no Makefile"

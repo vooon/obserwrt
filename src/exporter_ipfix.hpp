@@ -1,25 +1,27 @@
 /*
  * obserwrt - IPFIX exporter (exporter_ipfix.hpp)
  *
- * Wire-identical port of exporter_ipfix.uc. Encodes normalized flow
- * observations as IPFIX (RFC 7011) over UDP with two templates branching on
- * IPv4-mapped ::ffff: (ssourceIPv4Address/destinationIPv4Address) vs IPv6.
+ * Wire-identical port of exporter_ipfix.uc (now the C++ agent encodes IPFIX
+ * RFC 7011 over UDP with two templates branching on IPv4-mapped ::ffff:
+ * sourceIPv4Address/destinationIPv4Address vs IPv6. The exporter owns its
+ * transport: a connected UdpClient sends datagrams; when not connected the
+ * datagrams accumulate in captured() so tests/harness can inspect the exact
+ * wire bytes (there is no injected Sink abstraction).
  *
- * The exporter is a faithful reimplementation of the ucode module so that the
- * golden-vector harness can compare byte-for-byte against the pinned outputs
- * of the deprecated ucode agent. Datagrams are handed to a Sink (the daemon
- * sends via UDP; the harness captures them).
+ * Datagrams are built into std::byte buffers with big-endian appenders (one
+ * memcpy per field, no byte-at-a-time push_back).
  */
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
-#include <functional>
+#include <span>
 #include <string>
-#include <string_view>
 #include <vector>
 
 #include "flow.hpp"
+#include "udp_client.hpp"
 
 namespace obserwrt
 {
@@ -27,13 +29,19 @@ namespace obserwrt
 class IpfixExporter
 {
       public:
-	using Sink = std::function<void(std::string)>;
-
 	explicit IpfixExporter(uint32_t obs_domain = 1);
 
-	/* Default sink captures datagrams so tests/harness can inspect bytes.
-	 * A daemon installs a real socket sink with set_sink(). */
-	void set_sink(Sink sink);
+	/* Owned transport: resolve + open the collector socket. When connected,
+	 * emitted datagrams go out; otherwise they accumulate in captured(). */
+	bool connect(const std::string &host, uint16_t port, const std::string &source_addr,
+		     std::string *err);
+
+	/* Failed sends since the last take (folded into the export error metric
+	 * by the daemon). */
+	unsigned long take_failures()
+	{
+		return udp_.take_failures();
+	}
 
 	/* Fixed epochs for deterministic wire output (tests). Real deployment sets
 	 * offset_ms = epoch_ms - mono_ms at startup and passes live timestamps. */
@@ -61,7 +69,8 @@ class IpfixExporter
 		return seq_;
 	}
 
-	const std::vector<std::string> &captured() const
+	/* Datagrams emitted while the exporter was NOT connected (tests). */
+	const std::vector<std::vector<std::byte>> &captured() const
 	{
 		return captured_;
 	}
@@ -78,20 +87,18 @@ class IpfixExporter
 	uint64_t offset_ms_ = 0;
 	uint32_t last_template_sent_s_ = 0;
 
-	Sink sink_;
-	std::vector<std::string> captured_;
-	std::vector<std::string> pending4_;
-	std::vector<std::string> pending6_;
+	UdpClient udp_;
+	std::vector<std::vector<std::byte>> captured_;
+	std::vector<std::vector<std::byte>> pending4_;
+	std::vector<std::vector<std::byte>> pending6_;
 
-	static void put16be(std::string &b, uint16_t v);
-	static void put32be(std::string &b, uint32_t v);
-	static void put64be(std::string &b, uint64_t v);
-
-	void send(std::string data);
-	void emit_set(uint32_t export_time_s, uint16_t set_id, const std::string &body, size_t cnt);
-	void flush_set(uint32_t export_time_s, uint16_t set_id, std::vector<std::string> &records);
-	std::string template_set(uint16_t tid,
-				 const std::vector<std::pair<uint16_t, uint16_t>> &fields);
+	void send(std::vector<std::byte> data);
+	void emit_set(uint32_t export_time_s, uint16_t set_id, const std::vector<std::byte> &body,
+		      size_t cnt);
+	void flush_set(uint32_t export_time_s, uint16_t set_id,
+		       std::vector<std::vector<std::byte>> &records);
+	std::vector<std::byte>
+	template_set(uint16_t tid, const std::vector<std::pair<uint16_t, uint16_t>> &fields);
 };
 
 } /* namespace obserwrt */

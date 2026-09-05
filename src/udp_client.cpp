@@ -103,12 +103,18 @@ bool UdpClient::connect(const std::string &host, uint16_t port, const std::strin
 	return false;
 }
 
-bool UdpClient::send(const std::string &data) const
+bool UdpClient::send(std::span<const std::byte> data)
 {
-	if (fd_ < 0)
+	if (fd_ < 0) {
+		failures_++;
 		return false;
-	return sendto(fd_, data.data(), data.size(), 0, (struct sockaddr *)&to_, tolen_) ==
-	       static_cast<ssize_t>(data.size());
+	}
+	const ssize_t n = sendto(fd_, data.data(), data.size(), 0, (struct sockaddr *)&to_, tolen_);
+	if (n != static_cast<ssize_t>(data.size())) {
+		failures_++;
+		return false;
+	}
+	return true;
 }
 
 } /* namespace obserwrt */

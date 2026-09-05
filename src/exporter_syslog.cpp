@@ -255,13 +255,6 @@ std::string SyslogExporter::frame(const std::string &message, const std::string 
 	return out;
 }
 
-std::string SyslogExporter::deliver(const std::string &message)
-{
-	if (sink_)
-		sink_(message);
-	return message;
-}
-
 void SyslogExporter::emit(const FlowKey &k, const FlowValue &v, bool expired, const Delta *delta)
 {
 	if (!enabled_)
@@ -276,9 +269,9 @@ void SyslogExporter::emit(const FlowKey &k, const FlowValue &v, bool expired, co
 	}
 
 	const std::string framed = frame(payload, host_, time(nullptr));
-	if (sink_)
-		sink_(framed);
-	else if (!remote_.send(framed))
+	const auto span =
+	    std::span(reinterpret_cast<const std::byte *>(framed.data()), framed.size());
+	if (!remote_.send(span))
 		DAEMON_LOG(LOG_WARNING, "syslog: send failed (%s)", std::strerror(errno));
 }
 

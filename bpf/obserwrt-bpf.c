@@ -29,11 +29,9 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
 
-/* Direction at the observation point. */
-enum direction {
-	INGRESS = 0,
-	EGRESS  = 1,
-};
+/* Shared flow key/value layouts (docs/design.md §5) - the single owner of
+ * the wire format, also included by the C++ agent (flow.hpp). */
+#include "obserwrt-flow.h"
 
 /* Per-instance aggregate counters ("set A" of the "two sets" design).
  * Packets/bytes count everything the TC filter sees; flows_created counts new
@@ -59,29 +57,6 @@ enum {
 #endif
 
 /* --- maps ------------------------------------------------------------- */
-
-struct flow_key {
-	__u32 ifindex;   /*  0 */
-	__u8  direction; /*  4 0=ingress, 1=egress */
-	__u8  family;    /*  5 4|6 */
-	__u8  protocol;  /*  6 IP protocol number */
-	__u8  reserved;  /*  7 */
-	__u8  src[16];   /*  8 IPv4 as ::ffff:a.b.c.d */
-	__u8  dst[16];   /* 24 */
-	__u16 sport;     /* 40 0 for ICMP */
-	__u16 dport;     /* 42 0 for ICMP */
-	__u8  icmp_type; /* 44 */
-	__u8  icmp_code; /* 45 */
-} __attribute__((packed));
-
-struct flow_val {
-	__u64 packets;    /*  0 */
-	__u64 bytes;      /*  8 */
-	__u64 first_seen; /* 16 */
-	__u64 last_seen;  /* 24 */
-	__u16 tcp_flags;  /* 32 16-bit tcpControlBits (only low 8 standard flags) */
-	/* natural alignment -> sizeof == 40 */
-};
 
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
@@ -334,13 +309,13 @@ observe(struct __sk_buff *skb, __u8 direction)
 SEC("classifier/ingress")
 int obserwrt_ingress(struct __sk_buff *skb)
 {
-	return observe(skb, INGRESS);
+	return observe(skb, OBSERWRT_INGRESS);
 }
 
 SEC("classifier/egress")
 int obserwrt_egress(struct __sk_buff *skb)
 {
-	return observe(skb, EGRESS);
+	return observe(skb, OBSERWRT_EGRESS);
 }
 
 char LICENSE[] SEC("license") = "Apache-2.0";

@@ -162,18 +162,17 @@ bool Bpf::attached(uint32_t ifindex) const
 	return it != atts_.end() && it->second.in && it->second.eg;
 }
 
-bool Bpf::snapshot_keys(std::vector<std::string> &out) const
+bool Bpf::snapshot_keys(std::vector<FlowKey> &out) const
 {
 	out.clear();
 	if (!flows_)
 		return false;
 
-	const size_t ksz = bpf_map__key_size(flows_);
 	const size_t cap = bpf_map__max_entries(flows_);
 	int fd = bpf_map__fd(flows_);
 
-	std::string prev(ksz, '\0');
-	std::string next(ksz, '\0');
+	FlowKey prev = {};
+	FlowKey next = {};
 	bool first = true;
 
 	/* The map is an LRU that may evict BETWEEN get_next_key() calls. When the
@@ -188,50 +187,45 @@ bool Bpf::snapshot_keys(std::vector<std::string> &out) const
 		if (seen.size() >= cap)
 			return true;
 
-		const void *cur = first ? nullptr : prev.data();
-		if (bpf_map_get_next_key(fd, cur, next.data()) != 0) {
+		const void *cur = first ? nullptr : &prev;
+		if (bpf_map_get_next_key(fd, cur, &next) != 0) {
 			if (errno == ENOENT) /* end of map */
 				return true;
 			return false;
 		}
 
-		std::string key(next.data(), ksz);
-		if (!seen.insert(parse_key(key)).second)
+		if (!seen.insert(next).second)
 			return true; /* cursor evicted -> kernel restarted; we are done */
 
-		out.push_back(std::move(key));
-		prev.swap(next);
+		out.push_back(next);
+		prev = next;
 		first = false;
 	}
 }
 
-bool Bpf::lookup(const std::string &key, std::string &value) const
-{
-	if (!flows_ || key.size() != bpf_map__key_size(flows_))
-		return false;
-
-	const size_t vsz = bpf_map__value_size(flows_);
-	std::string raw(vsz, '\0');
-	if (bpf_map__lookup_elem(flows_, key.data(), key.size(), raw.data(), raw.size(), 0) != 0)
-		return false; /* LRU-evicted between iteration and read */
-	value.swap(raw);
-	return true;
-}
-
-bool Bpf::erase(const std::string &key) const
+bool Bpf::lookup(const FlowKey &key, FlowValue &value) const
 {
 	if (!flows_)
 		return false;
-	return bpf_map__delete_elem(flows_, key.data(), key.size(), 0) == 0;
+	if (bpf_map__lookup_elem(flows_, &key, sizeof(FlowKey), &value, sizeof(FlowValue), 0) != 0)
+		return false; /* LRU-evicted between iteration and read */
+	return true;
+}
+
+bool Bpf::erase(const FlowKey &key) const
+{
+	if (!flows_)
+		return false;
+	return bpf_map__delete_elem(flows_, &key, sizeof(FlowKey), 0) == 0;
 }
 
 void Bpf::purge_ifindex(uint32_t ifindex)
 {
-	std::vector<std::string> keys;
+	std::vector<FlowKey> keys;
 	if (!snapshot_keys(keys))
 		return;
-	for (const std::string &k : keys) {
-		if (parse_key(k).ifindex == ifindex)
+	for (const FlowKey &k : keys) {
+		if (k.ifindex == ifindex)
 			erase(k);
 	}
 }
@@ -267,7 +261,7 @@ void BpfFlowMap::reset()
 		b_->snapshot_keys(snapshot_);
 }
 
-bool BpfFlowMap::next_key(std::string &key)
+bool BpfFlowMap::next_key(FlowKey &key)
 {
 	if (pos_ >= snapshot_.size())
 		return false;
@@ -275,12 +269,12 @@ bool BpfFlowMap::next_key(std::string &key)
 	return true;
 }
 
-bool BpfFlowMap::get(const std::string &key, std::string &value)
+bool BpfFlowMap::get(const FlowKey &key, FlowValue &value)
 {
 	return b_->lookup(key, value);
 }
 
-bool BpfFlowMap::delete_key(const std::string &key)
+bool BpfFlowMap::delete_key(const FlowKey &key)
 {
 	return b_->erase(key);
 }

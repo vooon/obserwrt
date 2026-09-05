@@ -3,11 +3,16 @@
  *
  * Wire-identical port of exporter_ipfix.uc. See the header for the design
  * notes. The template/field/sequence/chunking semantics mirror the ucode
- * module byte-for-byte; this class is exercised by the golden-vector harness
- * against the pinned outputs of the deprecated ucode agent.
+ * module byte-for-byte; this class is exercised by the golden-vector harness.
+ *
+ * Datagrams are built into std::vector<std::byte> with big-endian appenders
+ * (one append/memcpy per field) and handed to the owned UdpClient as a span,
+ * or captured for tests when not connected.
  */
 
 #include "exporter_ipfix.hpp"
+
+#include <bit>
 
 #include <cstring>
 
@@ -17,7 +22,7 @@ namespace obserwrt
 namespace
 {
 
-constexpr uint32_t VERSION = 10;
+constexpr uint16_t VERSION = 10;
 
 /* Template field lists: [ieId, length] - identical to exporter_ipfix.uc. */
 const std::vector<std::pair<uint16_t, uint16_t>> FIELDS_V4 = {
@@ -41,16 +46,34 @@ const std::vector<std::pair<uint16_t, uint16_t>> FIELDS_V6 = {
     {7, 2},   {11, 2}, {4, 1}, {2, 8}, {1, 8}, {152, 8}, {153, 8}, {6, 2}, {10, 4}, {14, 4},
 };
 
+inline void append_raw(std::vector<std::byte> &b, const void *p, size_t n)
+{
+	const auto *q = static_cast<const std::byte *>(p);
+	b.insert(b.end(), q, q + n);
+}
+
+/* Append a host-order integer in network (big-endian) order: byteswap once
+ * then append the value's bytes, independent of host endianness. */
+template <typename T> inline void append_be(std::vector<std::byte> &b, T v)
+{
+	if constexpr (std::endian::native == std::endian::big) {
+		append_raw(b, &v, sizeof(v));
+	} else {
+		const T be = std::byteswap(v);
+		append_raw(b, &be, sizeof(be));
+	}
+}
+
 } /* namespace */
 
 IpfixExporter::IpfixExporter(uint32_t obs_domain) : obs_domain_(obs_domain)
 {
-	sink_ = [this](std::string data) { captured_.push_back(std::move(data)); };
 }
 
-void IpfixExporter::set_sink(Sink sink)
+bool IpfixExporter::connect(const std::string &host, uint16_t port, const std::string &source_addr,
+			    std::string *err)
 {
-	sink_ = std::move(sink);
+	return udp_.connect(host, port, source_addr, err);
 }
 
 void IpfixExporter::set_epoch(uint32_t export_time_s, uint64_t offset_ms)
@@ -64,89 +87,76 @@ void IpfixExporter::set_offset_ms(uint64_t offset_ms)
 	offset_ms_ = offset_ms;
 }
 
-void IpfixExporter::put16be(std::string &b, uint16_t v)
+void IpfixExporter::send(std::vector<std::byte> data)
 {
-	b.push_back(static_cast<char>(v >> 8));
-	b.push_back(static_cast<char>(v));
+	if (udp_.connected())
+		udp_.send(data);
+	else
+		captured_.push_back(std::move(data));
 }
 
-void IpfixExporter::put32be(std::string &b, uint32_t v)
+std::vector<std::byte>
+IpfixExporter::template_set(uint16_t tid, const std::vector<std::pair<uint16_t, uint16_t>> &fields)
 {
-	b.push_back(static_cast<char>(v >> 24));
-	b.push_back(static_cast<char>(v >> 16));
-	b.push_back(static_cast<char>(v >> 8));
-	b.push_back(static_cast<char>(v));
-}
-
-void IpfixExporter::put64be(std::string &b, uint64_t v)
-{
-	for (int i = 7; i >= 0; i--)
-		b.push_back(static_cast<char>(v >> (8 * i)));
-}
-
-void IpfixExporter::send(std::string data)
-{
-	sink_(std::move(data));
-}
-
-std::string IpfixExporter::template_set(uint16_t tid,
-					const std::vector<std::pair<uint16_t, uint16_t>> &fields)
-{
-	std::string rec;
-	put16be(rec, tid);
-	put16be(rec, static_cast<uint16_t>(fields.size()));
+	std::vector<std::byte> rec;
+	rec.reserve(4 + fields.size() * 4);
+	append_be(rec, tid);
+	append_be(rec, static_cast<uint16_t>(fields.size()));
 
 	for (const auto &f : fields) {
-		put16be(rec, f.first);
-		put16be(rec, f.second);
+		append_be(rec, f.first);
+		append_be(rec, f.second);
 	}
 
-	std::string out;
-	put16be(out, SET_TEMPLATE);
-	put16be(out, static_cast<uint16_t>(4 + rec.size()));
-	out += rec;
+	std::vector<std::byte> out;
+	out.reserve(4 + rec.size());
+	append_be(out, SET_TEMPLATE);
+	append_be(out, static_cast<uint16_t>(4 + rec.size()));
+	out.insert(out.end(), rec.begin(), rec.end());
 	return out;
 }
 
 void IpfixExporter::send_templates(uint32_t export_time_s)
 {
-	std::string body = template_set(IPV4_TID, FIELDS_V4) + template_set(IPV6_TID, FIELDS_V6);
+	std::vector<std::byte> body = template_set(IPV4_TID, FIELDS_V4);
+	std::vector<std::byte> v6 = template_set(IPV6_TID, FIELDS_V6);
+	body.insert(body.end(), v6.begin(), v6.end());
 
-	std::string m;
+	std::vector<std::byte> m;
 	m.reserve(16 + body.size());
-	put16be(m, VERSION);
-	put16be(m, static_cast<uint16_t>(16 + body.size()));
-	put32be(m, export_time_s);
-	put32be(m, seq_);
-	put32be(m, obs_domain_);
-	m += body;
+	append_be(m, VERSION);
+	append_be(m, static_cast<uint16_t>(16 + body.size()));
+	append_be(m, export_time_s);
+	append_be(m, seq_);
+	append_be(m, obs_domain_);
+	m.insert(m.end(), body.begin(), body.end());
 
 	send(std::move(m));
 	last_template_sent_s_ = export_time_s;
 }
 
-void IpfixExporter::emit_set(uint32_t export_time_s, uint16_t set_id, const std::string &body,
-			     size_t cnt)
+void IpfixExporter::emit_set(uint32_t export_time_s, uint16_t set_id,
+			     const std::vector<std::byte> &body, size_t cnt)
 {
-	std::string m;
+	std::vector<std::byte> m;
 	m.reserve(16 + 4 + body.size());
-	put16be(m, VERSION);
-	put16be(m, static_cast<uint16_t>(16 + 4 + body.size()));
-	put32be(m, export_time_s);
-	put32be(m, seq_);
-	put32be(m, obs_domain_);
-	put16be(m, set_id);
-	put16be(m, static_cast<uint16_t>(4 + body.size()));
-	m += body;
+	append_be(m, VERSION);
+	append_be(m, static_cast<uint16_t>(16 + 4 + body.size()));
+	append_be(m, export_time_s);
+	append_be(m, seq_);
+	append_be(m, obs_domain_);
+	append_be(m, set_id);
+	append_be(m, static_cast<uint16_t>(4 + body.size()));
+	m.insert(m.end(), body.begin(), body.end());
 
 	send(std::move(m));
 	seq_ += static_cast<uint32_t>(cnt);
 }
 
 void IpfixExporter::flush_set(uint32_t export_time_s, uint16_t set_id,
-			      std::vector<std::string> &records)
+			      std::vector<std::vector<std::byte>> &records)
 {
-	std::string body;
+	std::vector<std::byte> body;
 	size_t cnt = 0;
 
 	for (const auto &r : records) {
@@ -155,7 +165,7 @@ void IpfixExporter::flush_set(uint32_t export_time_s, uint16_t set_id,
 			body.clear();
 			cnt = 0;
 		}
-		body += r;
+		body.insert(body.end(), r.begin(), r.end());
 		cnt++;
 	}
 
@@ -174,26 +184,26 @@ void IpfixExporter::emit(const FlowKey &k, const FlowValue &v, const Delta *delt
 	const uint32_t ingress = (k.direction == INGRESS) ? k.ifindex : 0;
 	const uint32_t egress = (k.direction == EGRESS) ? k.ifindex : 0;
 
-	std::string rec;
+	std::vector<std::byte> rec;
 
 	if (k.family == 4) {
-		rec.append(reinterpret_cast<const char *>(k.src + 12), 4);
-		rec.append(reinterpret_cast<const char *>(k.dst + 12), 4);
+		append_raw(rec, k.src + 12, 4);
+		append_raw(rec, k.dst + 12, 4);
 	} else {
-		rec.append(reinterpret_cast<const char *>(k.src), 16);
-		rec.append(reinterpret_cast<const char *>(k.dst), 16);
+		append_raw(rec, k.src, 16);
+		append_raw(rec, k.dst, 16);
 	}
 
-	put16be(rec, k.sport);
-	put16be(rec, k.dport);
-	rec.push_back(static_cast<char>(k.protocol & 0xff));
-	put64be(rec, dp);
-	put64be(rec, db);
-	put64be(rec, start_ms);
-	put64be(rec, end_ms);
-	put16be(rec, v.tcp_flags);
-	put32be(rec, ingress);
-	put32be(rec, egress);
+	append_be(rec, k.sport);
+	append_be(rec, k.dport);
+	rec.push_back(static_cast<std::byte>(k.protocol));
+	append_be(rec, dp);
+	append_be(rec, db);
+	append_be(rec, start_ms);
+	append_be(rec, end_ms);
+	append_be(rec, v.tcp_flags);
+	append_be(rec, ingress);
+	append_be(rec, egress);
 
 	if (k.family == 4)
 		pending4_.push_back(std::move(rec));

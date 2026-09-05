@@ -20,7 +20,6 @@
 
 #include "exporter_ipfix.hpp"
 #include "flow.hpp"
-#include "udp_client.hpp"
 
 namespace
 {
@@ -55,16 +54,13 @@ int main(int argc, char **argv)
 	const std::string host = h ? h : "127.0.0.1";
 	const uint16_t port = static_cast<uint16_t>(p ? std::atoi(p) : 4739);
 
-	obserwrt::UdpClient udp;
+	obserwrt::IpfixExporter ex(1);
 	std::string err;
-	if (!udp.connect(host, port, "", &err)) {
+	if (!ex.connect(host, port, "", &err)) {
 		std::fprintf(stderr, "emit: connect %s:%u failed: %s\n", host.c_str(), port,
 			     err.c_str());
 		return 1;
 	}
-
-	obserwrt::IpfixExporter ex(1);
-	ex.set_sink([&](std::string data) { udp.send(data); });
 
 	const uint32_t start_s = static_cast<uint32_t>(time(nullptr));
 	ex.set_epoch(start_s, static_cast<uint64_t>(start_s) * 1000ULL - mono_ms());

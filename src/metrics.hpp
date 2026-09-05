@@ -37,6 +37,7 @@ class Metrics
 	/* Cheap dispatch counters (per-flow args retained only for symmetry). */
 	void observe();
 	void record_error();
+	void record_errors(unsigned long n);
 
 	/* Gauges from one lifecycle pass + currently attached netdev names. */
 	void set_state(unsigned flows_active, unsigned map_entries,

@@ -8,9 +8,9 @@ Guidance for AI coding agents working in this repository.
 built on a C++23 agent (libbpf, rtnetlink, libuci). It observes traffic on
 selected Linux netdevs via TC ingress/egress, tracks flows in a BPF hash map,
 and exports normalized observations to IPFIX (Akvorado) and a syslog exporter.
-Until v0.2.6 the agent was implemented in ucode; it was rewritten in C++ for
-the CPU/RAM footprint of the ucode VM on low-end MIPS routers (the eBPF
-program and the observation model are unchanged).
+The original ucode agent (≤ v0.2.6) was rewritten to C++ for the CPU/RAM
+footprint of the ucode VM on low-end MIPS routers and removed; the eBPF
+program and the observation model are unchanged.
 
 Authoritative design: [`docs/design.md`](docs/design.md). Read it before making
 architectural changes. Do not let the implementation drift from it.
@@ -34,13 +34,14 @@ architectural changes. Do not let the implementation drift from it.
 - **Flow key (46 B, packed, native endian):** `u32 ifindex; u8 direction; u8
   family; u8 protocol; u8 icmp_type; u8 icmp_code; u8 reserved; u8 src[16]; u8
   dst[16]; u16 sport; u16 dport`.
-  struct format: `"<LBBBx16s16sHHBB"` (little-endian; use `>` prefix on big-endian
-  targets). The reserved byte keeps `src`/`dst` 4-byte aligned; `icmp_type`/
+  Single source: `bpf/obserwrt-flow.h`, shared by the eBPF program and the C++
+  agent (`flow.hpp` types it as `FlowKey`); native byte order, no portability
+  layer. The reserved byte keeps `src`/`dst` 4-byte aligned; `icmp_type`/
   `icmp_code` are 0 for TCP/UDP, and `sport`/`dport` are 0 for ICMP.
 - **Flow value (40 B):** `u64 packets; u64 bytes; u64 first_seen; u64 last_seen;
   u16 tcp_flags` (naturally aligned: counters must be 8-byte aligned for atomic
   increments). `tcp_flags` is a 16-bit `tcpControlBits` union (only the standard
-  low-8 TCP flags are accumulated; use OR, not sum). struct format `"<QQQQH6x"`.
+  low-8 TCP flags are accumulated; use OR, not sum). Same shared header.
 - **Address normalization:** IPv4 stored as IPv4-mapped IPv6 `::ffff:a.b.c.d`
   in the 16-byte fields. `family` is retained in the key for alignment/debug.
 - **Interface identity:** real kernel ifIndex, read at attach time via
@@ -58,7 +59,8 @@ architectural changes. Do not let the implementation drift from it.
 - **IPFIX:** `destination` accepts an IP or hostname (resolved via the target's
   resolver). Two templates branching on the `::ffff:` prefix — v4 emits
   `sourceIPv4Address`/`destinationIPv4Address` (last 4 bytes), otherwise IPv6
-  IEs. Wire encoding via `struct.buffer()` / `struct.new('!…')`.
+  IEs. Wire encoding is big-endian (`std::byteswap` appenders in the exporter);
+  datagrams are `std::byte` buffers handed to the transport as spans.
 
 ## Directory layout
 
@@ -67,8 +69,8 @@ obserwrt/                     # OpenWrt package (also a feed root)
 ├── CMakeLists.txt            # one build for OpenWrt (cmake.mk) and Linux (CPack)
 ├── src/                      # C++23 agent
 │   ├── main.cpp              # epoll loop, exporters, reconcile wiring
-│   ├── flow.hpp              # §5 key/value PODs + endian pack/unpack
-│   ├── bpf.cpp               # libbpf: map, batch-walk, tcx attach, stats
+│   ├── flow.hpp              # §5 key/value types (alias of bpf/obserwrt-flow.h)
+│   ├── bpf.cpp               # libbpf: map, walk, tcx attach, stats
 │   ├── lifecycle.cpp         # delta accounting + per-proto expiry
 │   ├── reconcile.cpp         # rtnetlink dump + RTM_NEWLINK/RTM_DELLINK
 │   ├── exporter_ipfix.cpp    # IPFIX (templates 256/257, chunking)
@@ -80,7 +82,9 @@ obserwrt/                     # OpenWrt package (also a feed root)
 │   ├── prometheus.cpp        # exposition builder (HELP/TYPE once, labels)
 │   ├── log.hpp               # DAEMON_LOG gated by main.log_level
 │   └── version.hpp           # build_info {version,commit,os,arch}
-├── src/obserwrt-bpf.c        # the eBPF program (shared, unchanged)
+├── bpf/                      # eBPF program (C) + shared §5 wire-format header
+│   ├── obserwrt-bpf.c        # TC ingress/egress flow observation
+│   └── obserwrt-flow.h       # flow_key/flow_val PODs (single source)
 ├── vendor/                   # 3rd-party headers (nlohmann/json, inifile-cpp)
 ├── linux/                    # systemd unit + .conf for the plain-Linux .deb
 ├── obserwrt/
@@ -88,12 +92,12 @@ obserwrt/                     # OpenWrt package (also a feed root)
 │   └── files/obserwrt.init   # procd script (flat)
 │   └── files/obserwrt.conf   # UCI config (flat)
 ├── tests/                    # golden harness + native goflow2 e2e emitter
-└── scripts/                  # e2e driver + transitional ucode helper scripts
+└── scripts/                  # e2e driver
 ```
 
-The repo is used directly as an OpenWrt package feed; package sources under the
-top-level `obserwrt/` package dir (all other top-level dirs — `.github`,
-`docs`, `scripts`, `src`, `tests`, `linux`, `vendor` — are non-package).
+`src/obserwrt-bpf.c` now lives in `bpf/`; the feeds/layout line below reflects
+that. The eBPF program is compiled from source via `include/bpf.mk` (OpenWrt)
+or clang (Linux CMake) — never checked in.
 
 ## Dependencies
 
@@ -121,8 +125,8 @@ clang-tidy -p build -checks="-*,clang-analyzer-*,bugprone-*,-bugprone-easily-swa
 # Needs the system kernel UAPI + libbpf headers (linux-libc-dev, libbpf-dev):
 #   mkdir -p /tmp/uapi && ln -s /usr/include/linux /tmp/uapi/linux
 #   inc="-I/tmp/uapi -I/usr/include/x86_64-linux-gnu -I/usr/include"
-#   clang -O2 -g -target bpfel $inc -c src/obserwrt-bpf.c -o /tmp/bpfel.o
-#   clang -O2 -g -target bpfeb $inc -c src/obserwrt-bpf.c -o /tmp/bpfeb.o
+#   clang -O2 -g -target bpfel $inc -c bpf/obserwrt-bpf.c -o /tmp/bpfel.o
+#   clang -O2 -g -target bpfeb $inc -c bpf/obserwrt-bpf.c -o /tmp/bpfeb.o
 ```
 
 CI runs the native build/harness, the clang-format + clang-tidy gates, the eBPF
@@ -141,25 +145,17 @@ build/obserwrt -c linux/obserwrt.conf
 - **C++23**, exceptions-free (`-fno-exceptions`; inifile-cpp is the only TU
   compiled with `-fexceptions`), no iostream. Optimization follows the image/
   host toolchain (`-Os`/`-O2`); never hardcode it.
-- Wire formats are owned by `flow.hpp` (PODs with `static_assert` sizes) and
-  the golden harness; change the `§5` key/value layout or any IPFIX metric NAME
-  only as a deliberate incompatibility.
-- Big-endian safeness: the BPF map is native-endian; pack/unpack explicitly.
+- Wire formats are owned by `bpf/obserwrt-flow.h` (PODs with `_Static_assert`
+  sizes) and the golden harness; change the `§5` key/value layout or any IPFIX
+  metric NAME only as a deliberate incompatibility.
+- Big-endian safeness: the BPF map is native-endian; only the IPFIX wire
+  encoding byte-swaps (via `std::byteswap` in the exporter).
 - Daemon diagnostics go through `DAEMON_LOG` (`src/log.hpp`), gated by
   `main.log_level`; never `setlogmask()` (it would mute the syslog exporter's
   local flow records). Device/link events are observable at `debug`.
 - Config lives behind the `Config` facade (`config_uci.cpp`/`config_mini.cpp`);
   one option set, two backends.
 - Do not check in compiled `.o`/eBPF objects; build from source.
-
-## Transitional ucode files
-
-The deprecated ucode agent (`obserwrt/files/usr/share/ucode/obserwrt/`,
-`scripts/emit-test.uc`, the fw4-style `obserwrt/tests/*.uc`) is retained until
-the C++ agent flips in production. It is superseded by `src/` — do not extend
-it. ucode-specific guidance (trailing `;` on `export function`, no function
-hoisting, no `arr.push()`, `for (x in arr)` yields elements, etc.) applies only
-to those files; see `docs/design.md` §1 for the v0.2.6→C++ history.
 
 ## Do not
 
@@ -180,10 +176,7 @@ to those files; see `docs/design.md` §1 for the v0.2.6→C++ history.
 - **Golden harness** (`tests/harness.cpp`, `ctest`): pins the IPFIX v4/v6 wire
   bytes (templates 256/257 incl. IE 152/153), the §5 key/value layouts, the
   lifecycle delta/expiry contract, syslog JSON/logfmt/envelopes, the Prometheus
-  exposition, and both config backends, against the ucode agent's expectations.
-- **Transitional ucode tests** (`obserwrt/tests/run_tests.sh`): fw4-style
-  declarative tests for the deprecated agent; retained until the flip. Uses
-  OpenWrt's fw4 ISC-licensed mock framework; attribution retained.
+  exposition, and both config backends.
 
 ## Milestones (see design §13)
 
