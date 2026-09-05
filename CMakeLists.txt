@@ -81,6 +81,7 @@ add_library(obserwrt_core OBJECT
   src/exporter_ipfix.cpp
   ${OBSEWRRT_CONFIG_SRC}
   src/exporter_syslog.cpp
+  src/hash.cpp
   src/lifecycle.cpp
   src/metrics.cpp
   src/prometheus.cpp
