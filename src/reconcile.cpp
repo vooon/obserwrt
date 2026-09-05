@@ -67,15 +67,17 @@ bool Reconcile::open(std::string *err)
 	}
 
 	int grp = RTMGRP_LINK;
-	const int mrc = setsockopt(fd_, SOL_NETLINK, NETLINK_ADD_MEMBERSHIP, &grp, sizeof(grp));
-	DAEMON_LOG(LOG_DEBUG, "netlink fd=%d group=RTMGRP_LINK rc=%d errno=%d", fd_, mrc,
-		   mrc < 0 ? errno : 0);
-	if (mrc < 0)
-		DAEMON_LOG(LOG_WARNING, "netlink: cannot join RTMGRP_LINK (%s)", strerror(errno));
+	DAEMON_LOG(LOG_DEBUG, "netlink fd=%d subscribing RTMGRP_LINK", fd_);
 
 	struct sockaddr_nl sa;
 	std::memset(&sa, 0, sizeof(sa));
 	sa.nl_family = AF_NETLINK;
+	/* Multicast link notifications must arrive in the BIND sockaddr:
+	 * netlink_bind() mirrors nl_groups into the socket groups, REPLACING any
+	 * setsockopt(NETLINK_ADD_MEMBERSHIP) made beforehand. Binding with
+	 * nl_groups=0 silently drops every live RTM_NEWLINK/RTM_DELLINK after
+	 * the (unicast) startup dump - the netifd 'ip monitor' pattern. */
+	sa.nl_groups = grp;
 	if (bind(fd_, (struct sockaddr *)&sa, sizeof(sa)) != 0) {
 		if (err)
 			*err = std::string("reconcile: netlink bind: ") + std::strerror(errno);
