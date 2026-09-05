@@ -75,9 +75,20 @@ bool Bpf::load(const std::string &path, uint32_t max_flows, std::string *err)
 	}
 
 	/* Runtime flow-map sizing (design §16 v0.3). Set before load; the map
-	 * memory is committed at load time. 0 keeps the baked default. */
-	if (max_flows)
-		bpf_map__set_max_entries(flows_, max_flows);
+	 * memory is committed at load time.
+	 *   max_flows > 0 -> the configured value;
+	 *   max_flows == 0 -> the .o's baked default (FLOW_MAP_ENTRIES), with a
+	 *   4096 fallback when the object baked an empty value (a build that
+	 *   passed an empty -DFLOW_MAP_ENTRIES=). */
+	{
+		__u32 entries = max_flows;
+		if (entries == 0) {
+			entries = bpf_map__max_entries(flows_);
+			if (entries == 0)
+				entries = 4096;
+		}
+		bpf_map__set_max_entries(flows_, entries);
+	}
 
 	/* libbpf >= 1.6 no longer infers SCHED_CLS from SEC("classifier/x"); the
 	 * tcx attach point below comes from the expected attach type. */

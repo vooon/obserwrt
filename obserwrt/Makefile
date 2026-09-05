@@ -40,11 +40,12 @@ CMAKE_OPTIONS += \
 	-DCMAKE_CXX_FLAGS_RELEASE=""
 
 # The daemon is built by CMake (Build/Compile/Default); the eBPF object is
-# compiled from source by bpf.mk's CompileBPF (the Kconfig flow-map default is
-# baked in; runtime max_flows overrides it at load).
+# compiled from source by bpf.mk's CompileBPF. No FLOW_MAP_ENTRIES define is
+# passed: obserwrt-bpf.c defaults to 4096, and the daemon's runtime
+# `max_flows` overrides it at load (max_flows=0 stays the 4k baked default).
 define Build/Compile
 	$(call Build/Compile/Default)
-	$(call CompileBPF,$(PKG_BUILD_DIR)/obserwrt-bpf.c,-DFLOW_MAP_ENTRIES=$(FLOW_MAP_ENTRIES))
+	$(call CompileBPF,$(PKG_BUILD_DIR)/obserwrt-bpf.c)
 endef
 
 define Package/obserwrt
