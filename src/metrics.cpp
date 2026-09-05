@@ -9,6 +9,7 @@
 #include "metrics.hpp"
 
 #include <fcntl.h>
+#include <syslog.h>
 #include <unistd.h>
 
 #include <cerrno>
@@ -112,8 +113,8 @@ void Metrics::write()
 	const std::string tmp = file_ + ".tmp";
 	int fd = open(tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
 	if (fd < 0) {
-		std::fprintf(stderr, "metrics: cannot write %s: %s\n", tmp.c_str(),
-			     std::strerror(errno));
+		::syslog(LOG_WARNING, "metrics: cannot write %s: %s", tmp.c_str(),
+			 std::strerror(errno));
 		return;
 	}
 
@@ -134,8 +135,8 @@ void Metrics::write()
 	}
 
 	if (rename(tmp.c_str(), file_.c_str()) != 0) {
-		std::fprintf(stderr, "metrics: cannot rename %s: %s\n", tmp.c_str(),
-			     std::strerror(errno));
+		::syslog(LOG_WARNING, "metrics: cannot rename %s: %s", tmp.c_str(),
+			 std::strerror(errno));
 		unlink(tmp.c_str());
 	}
 }

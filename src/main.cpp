@@ -160,6 +160,10 @@ int main(int argc, char **argv)
 	if (!cli)
 		return exit_code;
 
+	/* Diagnostics go to syslog(3) (logd/journald) regardless of how procd
+	 * wires the fds - that is why they are visible in logread on OpenWrt. */
+	openlog("obserwrt", LOG_PID, LOG_DAEMON);
+
 	const std::string config_path = cli->config_path.empty()
 					    ? std::string(obserwrt::Cli::default_config_path())
 					    : cli->config_path;
@@ -173,7 +177,7 @@ int main(int argc, char **argv)
 	std::string err;
 	const obserwrt::Config cfg = obserwrt::load_config(config_path, &err);
 	if (!err.empty()) {
-		std::fprintf(stderr, "obserwrt: fatal: %s\n", err.c_str());
+		::syslog(LOG_ERR, "fatal: %s", err.c_str());
 		return 1;
 	}
 
@@ -186,15 +190,13 @@ int main(int argc, char **argv)
 	std::string syslog_err;
 	const bool syslog_active = syslog.init(cfg.syslog, &syslog_err);
 	if (!syslog_err.empty())
-		std::fprintf(stderr, "obserwrt: syslog: %s\n", syslog_err.c_str());
-	if (syslog_active || cfg.ipfix.enabled)
-		openlog("obserwrt", LOG_PID, LOG_DAEMON);
+		::syslog(LOG_WARNING, "syslog: %s", syslog_err.c_str());
 
 	UdpOut ipfix_sock;
 	if (cfg.ipfix.enabled) {
 		if (!ipfix_sock.open(cfg.ipfix.collector_host, cfg.ipfix.collector_port,
 				     cfg.ipfix.source_address, &err)) {
-			std::fprintf(stderr, "obserwrt: fatal: %s\n", err.c_str());
+			::syslog(LOG_ERR, "fatal: %s", err.c_str());
 			return 1;
 		}
 		ipfix.set_sink([&](const std::string &data) { ipfix_sock.send(data); });
@@ -208,7 +210,7 @@ int main(int argc, char **argv)
 
 	obserwrt::Bpf bpf;
 	if (!bpf.load(bpf_object, cfg.max_flows, &err)) {
-		std::fprintf(stderr, "obserwrt: fatal: bpf: %s\n", err.c_str());
+		::syslog(LOG_ERR, "fatal: bpf: %s", err.c_str());
 		return 1;
 	}
 	metrics.set_map_limit(bpf.map_limit());
@@ -218,7 +220,7 @@ int main(int argc, char **argv)
 
 	obserwrt::Reconcile rec;
 	if (!rec.open(&err)) {
-		std::fprintf(stderr, "obserwrt: fatal: %s\n", err.c_str());
+		::syslog(LOG_ERR, "fatal: %s", err.c_str());
 		return 1;
 	}
 
@@ -249,8 +251,8 @@ int main(int argc, char **argv)
 			if (bpf.attach(ev.ifindex, &err))
 				name_by_index[ev.ifindex] = ev.ifname;
 			else
-				std::fprintf(stderr, "obserwrt: attach %s: %s\n", ev.ifname.c_str(),
-					     err.c_str());
+				::syslog(LOG_WARNING, "attach %s: %s", ev.ifname.c_str(),
+					 err.c_str());
 		} else if (bpf.attached(ev.ifindex)) {
 			bpf.detach(ev.ifindex);
 			bpf.purge_ifindex(ev.ifindex);
@@ -260,25 +262,23 @@ int main(int argc, char **argv)
 	};
 
 	if (!rec.dump(on_link, &err))
-		std::fprintf(stderr, "obserwrt: reconcile dump: %s\n", err.c_str());
+		::syslog(LOG_WARNING, "reconcile dump: %s", err.c_str());
 
 	if (!cfg.ipfix.enabled && !syslog_active)
-		std::fprintf(stderr,
-			     "obserwrt: no exporters enabled; observations will not be exported\n");
+		::syslog(LOG_WARNING, "no exporters enabled; observations will not be exported");
 
-	std::fprintf(
-	    stderr,
-	    "obserwrt: started (config %s, bpf %s, devices %zu, ipfix %s, syslog %s, metrics %s)\n",
-	    config_path.c_str(), bpf_object.c_str(), cfg.devices.size(),
-	    cfg.ipfix.enabled ? "on" : "off", syslog_active ? "on" : "off",
-	    metrics.active() ? cfg.prometheus_textfile.c_str() : "off");
+	::syslog(LOG_INFO,
+		 "started (config %s, bpf %s, devices %zu, ipfix %s, syslog %s, metrics %s)",
+		 config_path.c_str(), bpf_object.c_str(), cfg.devices.size(),
+		 cfg.ipfix.enabled ? "on" : "off", syslog_active ? "on" : "off",
+		 metrics.active() ? cfg.prometheus_textfile.c_str() : "off");
 
 	const uint32_t metric_s = cfg.prometheus_interval > 0 ? cfg.prometheus_interval : 20;
 	int ep = epoll_create1(EPOLL_CLOEXEC);
 	int t_life = make_timer(LIFECYCLE_S, &err);
 	int t_meter = make_timer(metric_s, &err);
 	if (ep < 0 || t_life < 0 || t_meter < 0) {
-		std::fprintf(stderr, "obserwrt: fatal: %s\n", err.c_str());
+		::syslog(LOG_ERR, "fatal: %s", err.c_str());
 		return 1;
 	}
 
@@ -299,7 +299,7 @@ int main(int argc, char **argv)
 		if (n < 0) {
 			if (errno == EINTR)
 				continue;
-			std::fprintf(stderr, "obserwrt: epoll: %s\n", std::strerror(errno));
+			::syslog(LOG_ERR, "epoll: %s", std::strerror(errno));
 			return 1;
 		}
 
