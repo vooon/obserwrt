@@ -35,10 +35,10 @@ jobs:
             make
 
       - name: Shellcheck init script
-        if: ${{ hashFiles('obserwrt/files/etc/init.d/obserwrt') != '' }}
+        if: ${{ hashFiles('obserwrt/files/obserwrt.init') != '' }}
         run: |
           set -euo pipefail
-          shellcheck obserwrt/files/etc/init.d/obserwrt
+          shellcheck obserwrt/files/obserwrt.init
 
       - name: Lint ucode modules (node ESM parse + ucode rules)
         # ucode is ECMAScript-based; node's parser catches syntax, plus a couple
@@ -102,6 +102,51 @@ jobs:
           clang -O2 -g -target bpfeb $inc \
             -c obserwrt/src/obserwrt-bpf.c -o "$out/obserwrt-bpfeb.o"
 
+  native:
+    name: Native C++ build, golden harness, linters
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            g++ cmake make clang-format clang-tidy libbpf-dev clang linux-libc-dev
+
+      - name: Configure + build (-Werror)
+        run: |
+          set -euo pipefail
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j2
+
+      - name: Golden-vector harness
+        run: |
+          set -euo pipefail
+          ctest --test-dir build --output-on-failure
+
+      - name: clang-format check (our sources, not the vendored inifile)
+        run: |
+          set -euo pipefail
+          for f in $(find src tests -name '*.[ch]pp' | grep -v vendor); do
+            clang-format --dry-run --Werror "$f"
+          done
+
+      - name: clang-tidy (compile DB, curated checks)
+        run: |
+          set -euo pipefail
+          cmake -S . -B build-tidy -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          cmake --build build-tidy -j2
+          # Only the sources actually in this configuration's compile DB
+          # (config_luci.cpp is OpenWrt-only and absent on the host).
+          files=$(jq -r '.[].file' build-tidy/compile_commands.json \
+            | grep '/src/')
+          test -n "$files"
+          checks="-checks=-*,clang-analyzer-*,bugprone-*,-bugprone-easily-swappable-parameters,performance-*"
+          clang-tidy -p build-tidy --warnings-as-errors='*' \
+            --checks "$checks" $files
+
   feed-health:
     name: Feed registration check
     runs-on: ubuntu-latest
@@ -113,11 +158,12 @@ jobs:
           set -euo pipefail
           # Every immediate subdirectory that looks like an OpenWrt package must
           # contain a Makefile, otherwise `scripts/feeds update`/`install` skips
-          # it silently. `.github`, `docs` and other non-package dirs are exempt.
-          for dir in */; do
-            dir="${dir%/}"
+          # it silently. Non-package dirs are exempt: `.github`, `docs`,
+          # `scripts`, `src`, `tests`, `linux`, `vendor`, `.git`.
+          for dir in $(find . -mindepth 1 -maxdepth 1 -type d ! -name '.*'); do
+            dir="${dir#./}"
             case "$dir" in
-              .github|docs|scripts) continue ;;
+              docs|scripts|src|tests|linux|vendor) continue ;;
             esac
             if [ -d "$dir" ] && [ ! -f "$dir/Makefile" ]; then
               echo "::error::$dir/ exists but has no Makefile"

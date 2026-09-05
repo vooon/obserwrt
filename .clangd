@@ -1,0 +1,7 @@
+# Editor hint for clangd - the CMake build is authoritative; this just keeps
+# the IDE from red-marking includes until a compile_commands.json is generated.
+CompileFlags:
+  Add:
+    - -std=c++23
+    - -I${workspaceRoot}/src
+    - -I${workspaceRoot}/vendor

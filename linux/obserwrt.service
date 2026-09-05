@@ -1,0 +1,16 @@
+# obserwrt - eBPF network observability agent
+[Unit]
+Description=obserwrt eBPF network observability agent
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+# BPF_OBJ legacy env; the --bpf-object flag overrides the compiled default.
+Environment=BPF_OBJ=/usr/lib/obserwrt/obserwrt-bpf.o
+ExecStart=/usr/bin/obserwrt
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
