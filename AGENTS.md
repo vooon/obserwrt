@@ -4,18 +4,21 @@ Guidance for AI coding agents working in this repository.
 
 ## Project
 
-`obserwrt` — lightweight eBPF network observability for OpenWrt, built on ucode
-and `ucode-mod-bpf`. It observes traffic on selected Linux netdevs via TC
-ingress/egress, tracks flows in a BPF hash map, and exports normalized
-observations to IPFIX (Akvorado) and a syslog exporter.
+`obserwrt` — lightweight eBPF network observability for OpenWrt and plain Linux,
+built on a C++23 agent (libbpf, rtnetlink, libuci). It observes traffic on
+selected Linux netdevs via TC ingress/egress, tracks flows in a BPF hash map,
+and exports normalized observations to IPFIX (Akvorado) and a syslog exporter.
+Until v0.2.6 the agent was implemented in ucode; it was rewritten in C++ for
+the CPU/RAM footprint of the ucode VM on low-end MIPS routers (the eBPF
+program and the observation model are unchanged).
 
 Authoritative design: [`docs/design.md`](docs/design.md). Read it before making
 architectural changes. Do not let the implementation drift from it.
 
 ## Core rule (do not violate)
 
-> **eBPF observes packets, ucode manages observations, exporters encode them,
-> and downstream systems assign meaning.**
+> **eBPF observes packets, the agent manages observations, exporters encode
+> them, and downstream systems assign meaning.**
 
 - eBPF only parses packets and updates the flow map. No IPFIX encoding, routing
   interpretation, service/DNS classification, topology, or BIRD logic in eBPF.
@@ -43,10 +46,12 @@ architectural changes. Do not let the implementation drift from it.
 - **Interface identity:** real kernel ifIndex, read at attach time via
   `if_nametoindex`. Recreated devices get a new ifIndex; always attach to the
   current incarnation. Never invent static obserwrt interface IDs.
-- **Reconciliation (netifd-only in v1):** startup enumeration of existing
-  devices, then subscribe to netifd `network.device` events and react to
-  `add`/`up` (attach) and `remove`/`down` (detach + purge that device's
-  entries). **No periodic rescan** in v1.
+- **Reconciliation (rtnetlink):** startup `RTM_GETLINK` enumeration of existing
+  devices, then subscribe to live `RTM_NEWLINK`/`RTM_DELLINK` (the group must
+  be in the `bind()` sockaddr — `netlink_bind` replaces prior setsockopt
+  membership). `up`/`add` -> attach, `down`/remove -> detach + purge that
+  device's entries. A rename of an attached device detaches when it no longer
+  matches, else refreshes the stored name. **No periodic rescan.**
 - **Self-observability:** Prometheus via the node-exporter textfile collector
   (`/run/prometheus/textfile/obserwrt.prom`, atomic temp+rename). obserwrt
   must **not** implement an HTTP server. No per-flow labels.
@@ -59,46 +64,58 @@ architectural changes. Do not let the implementation drift from it.
 
 ```text
 obserwrt/                     # OpenWrt package (also a feed root)
-├── files/etc/config/obserwrt # UCI
-├── files/etc/init.d/obserwrt # procd
-├── files/usr/share/ucode/obserwrt/obserwrt.uc    # procd entry
-├── files/usr/share/ucode/obserwrt/flow.uc        # BPF map access
-├── files/usr/share/ucode/obserwrt/reconcile.uc   # device lifecycle + reporting
-├── files/usr/share/ucode/obserwrt/lifecycle.uc   # flow expiry/export pass
-├── files/usr/share/ucode/obserwrt/exporter_ipfix.uc   # IPFIX exporter
-└── src/obserwrt-bpf.c        # TC ingress/egress sections
+├── CMakeLists.txt            # one build for OpenWrt (cmake.mk) and Linux (CPack)
+├── src/                      # C++23 agent
+│   ├── main.cpp              # epoll loop, exporters, reconcile wiring
+│   ├── flow.hpp              # §5 key/value PODs + endian pack/unpack
+│   ├── bpf.cpp               # libbpf: map, batch-walk, tcx attach, stats
+│   ├── lifecycle.cpp         # delta accounting + per-proto expiry
+│   ├── reconcile.cpp         # rtnetlink dump + RTM_NEWLINK/RTM_DELLINK
+│   ├── exporter_ipfix.cpp    # IPFIX (templates 256/257, chunking)
+│   ├── exporter_syslog.cpp   # RFC 5424 json/logfmt, local/remote
+│   ├── metrics.cpp           # Prometheus textfile + build_info
+│   ├── config_uci.cpp        # OpenWrt libuci backend
+│   ├── config_mini.cpp       # plain-Linux inifile-cpp backend
+│   ├── udp_client.cpp        # dual-stack (v4/v6) remote UDP endpoint
+│   ├── prometheus.cpp        # exposition builder (HELP/TYPE once, labels)
+│   ├── log.hpp               # DAEMON_LOG gated by main.log_level
+│   └── version.hpp           # build_info {version,commit,os,arch}
+├── src/obserwrt-bpf.c        # the eBPF program (shared, unchanged)
+├── vendor/                   # 3rd-party headers (nlohmann/json, inifile-cpp)
+├── linux/                    # systemd unit + .conf for the plain-Linux .deb
+├── obserwrt/
+│   ├── Makefile              # OpenWrt package (cmake.mk + bpf.mk)
+│   └── files/obserwrt.init   # procd script (flat)
+│   └── files/obserwrt.conf   # UCI config (flat)
+├── tests/                    # golden harness + native goflow2 e2e emitter
+└── scripts/                  # e2e driver + transitional ucode helper scripts
 ```
 
-The `.uc` scripts are split into modules under `/usr/share/ucode/obserwrt/`
-(OpenWrt ucode convention — cf. `fw4.uc`, `cli/`, `node-exporter/`). The entry
-`obserwrt.uc` imports `flow.uc`, `reconcile.uc` and `lifecycle.uc`. ucode `.uc`
-modules use `export function foo(){…};` (trailing `;` required) and
-`import { foo } from './flow.uc'`.
-
 The repo is used directly as an OpenWrt package feed; package sources under the
-top-level `obserwrt/` package dir (all other top-level dirs, `.github`, `docs`,
-are non-package).
+top-level `obserwrt/` package dir (all other top-level dirs — `.github`,
+`docs`, `scripts`, `src`, `tests`, `linux`, `vendor` — are non-package).
 
 ## Dependencies
 
-`ucode`, `ucode-mod-bpf`, `ucode-mod-ubus`, `ucode-mod-struct`, `ucode-mod-log`,
-`ucode-mod-fs`, `ucode-mod-uloop`, `ucode-mod-socket`.
-eBPF object is built from source via `include/bpf.mk` (BPF toolchain), never
-checked in.
+Running the OpenWrt package: `libbpf`, `libuci`, `libstdcpp`. Plain Linux:
+`libbpf1`, `libstdc++6`. Vendored single headers: `nlohmann/json`,
+`inifile-cpp` (MIT). The eBPF object is built from source — via
+`include/bpf.mk` (OpenWrt) or clang (Linux CMake) — never checked in.
 
 ## Commands
 
 Checks (defined in `.github/workflows/ci.yml`):
 
 ```sh
-# Shell-syntax check the procd service (POSIX sh)
-shellcheck obserwrt/files/etc/init.d/obserwrt
+# Native build + golden-vector harness (from the repo root; needs libbpf-dev)
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DOBSEWRRT_BUILD_TESTS=ON
+cmake --build build
+ctest --test-dir build --output-on-failure
 
-# ucode bytecode/compile check (no exec; `-c`; requires stubbing imports)
-# for f in obserwrt/files/usr/share/ucode/obserwrt/*.uc; do ...; done
-
-# Fast ucode lint (node ESM parse + ucode rules; no FP toolchain needed)
-node scripts/uc-lint.mjs
+# Formatting + static analysis
+clang-format --dry-run --Werror $(find src tests -name '*.[ch]pp')
+clang-tidy -p build -checks="-*,clang-analyzer-*,bugprone-*,-bugprone-easily-swappable-parameters,performance-*" \
+  -warnings-as-errors='*' src/*.cpp
 
 # eBPF compile smoke, both byte orders (real headers, OpenWrt bpf.mk `uapi/` style)
 # Needs the system kernel UAPI + libbpf headers (linux-libc-dev, libbpf-dev):
@@ -108,78 +125,41 @@ node scripts/uc-lint.mjs
 #   clang -O2 -g -target bpfeb $inc -c src/obserwrt-bpf.c -o /tmp/bpfeb.o
 ```
 
-CI runs the static checks above and a feed-layout check. The ucode unit tests
-run where ucode and its OpenWrt modules are available. Run them after changes
-to `.uc`, `init.d`, or `.c`.
+CI runs the native build/harness, the clang-format + clang-tidy gates, the eBPF
+smoke, and a feed-layout check.
 
-Run the ucode agent directly with a config-files path during development:
+Run the daemon directly with `-c` during development:
 
 ```sh
-ucode -e 'import("obserwrt/files/usr/share/ucode/obserwrt/obserwrt.uc")'
+# Plain Linux:
+build/obserwrt -c linux/obserwrt.conf
+# OpenWrt (after package install): /etc/init.d/obserwrt {start,restart,info}
 ```
-
-## ucode (the agent language) is NOT JavaScript
-
-ucode is ECMAScript-inspired but is a distinct language with a smaller
-standard library. Do not assume JS features. Write code against the official
-docs, which are authoritative:
-
-- **Language/tutorials:** https://ucode.mein.io (Usage, Syntax, Memory,
-  Arrays, Dictionaries tutorials)
-- **Core module:** https://ucode.mein.io/module-core.html
-- **Log:** https://ucode.mein.io/module-log.html
-- **Struct:** https://ucode.mein.io/module-struct.html
-- **UCI:** https://ucode.mein.io/module-uci.html
-- **Ubus:** https://ucode.mein.io/module-ubus.html
-- **Uloop:** https://ucode.mein.io/module-uloop.html
-
-Known non-JS gotchas that have already bitten this project:
-
-- **`export function foo(){…}` must end with `;` in a `.uc` module** (this ucode
-  parses the export as an expression statement, so `export function f(){};`).
-  Import with `import { foo } from './foo.uc'` (relative path, like
-  node-exporter's `import { fetch_json } from '../http_client.uc'`).
-- **No function hoisting.** A function declared later in the file is undefined
-  when called earlier. Declare before use, or assign at the bottom near `main()`.
-  Do **not** use ucode's `function name;` forward-declaration (docs §4.2) for an
-  exported function: OpenWrt's shipped ucode lacks the export form, and a plain
-  `function x;` shadows the later `export function x` and silently stops the
-  module exporting it. Order definitions before use instead.
-- **No `arr.push()` / `arr.map()` etc. as methods.** Arrays use *global*
-  functions: `push(arr, …)`, `filter(arr, fn)`, `map(arr, fn)`, `pop(arr)`.
-- **No string `[]` indexing.** `s[i]` raises `left-hand side expression is not an
-  array or object`. Use `substr(s, i, 1)` or `ord(s, i)` to read a character.
-- **`for (x in arr)` yields elements, not indices** (on objects it yields keys).
-  Use `for (item in arr)` directly when you want the elements; iterate
-  `i = 0..length(arr)-1` only when you need the index.
-- **No `throw` statement** (there is `try`/`catch`; use `die()` to raise).
-- **No `RegExp` / `new RegExp`.** Use `regexp(source, flags)` plus `match(str, re)`,
-  or the built-in `wildcard(subject, pattern[, nocase])` (fnmatch-based glob) for
-  simple glob/pattern matching.
-- **No `{const x} = y` / `for (const i in …)`** — no `const` in loop heads; use
-  `let`.
-- **No implicit adjacent-string concatenation** (`'a' 'b'` is invalid) — use `+`.
-- **Object iteration**: `for (let k in obj)` gives keys; `keys(obj)` also works.
-  `for..in` over an object value that is actually null/other throws — guard first.
-- Undefined identifiers raise runtime "left-hand side is not a function"-style
-  errors, and `import` resolution needs the `ucode-mod-*` `.so` present (so a
-  CLI `ucode -c` syntax check requires stubbing imports — see CI).
-- **uci option values are strings.** Parse explicitly: `int(ctx.get('obserwrt',
-  'main', 'x'))` for a number, and for a bool use `int()`/explicit truthy
-  (`v == '1' && v`). List options (`list device …`) return an array.
-
-When in doubt, check the docs rather than assuming ECMAScript semantics.
 
 ## Conventions
 
-- **ucode byte packing:** use `struct.pack`/`unpack`/`struct.buffer` from
-  `ucode-mod-struct`. Do not hand-assemble byte strings or use `chr`/`ord`
-  loops for binary structures.
-- Match the native endianness of the eBPF object: `<` for little-endian targets
-  (`bpfel`), `>` for big-endian (`bpfeb`).
-- Blocking loops run on the procd/uloop event loop; keep the agent responsive
-  while reconciling devices and reading the flow map.
+- **C++23**, exceptions-free (`-fno-exceptions`; inifile-cpp is the only TU
+  compiled with `-fexceptions`), no iostream. Optimization follows the image/
+  host toolchain (`-Os`/`-O2`); never hardcode it.
+- Wire formats are owned by `flow.hpp` (PODs with `static_assert` sizes) and
+  the golden harness; change the `§5` key/value layout or any IPFIX metric NAME
+  only as a deliberate incompatibility.
+- Big-endian safeness: the BPF map is native-endian; pack/unpack explicitly.
+- Daemon diagnostics go through `DAEMON_LOG` (`src/log.hpp`), gated by
+  `main.log_level`; never `setlogmask()` (it would mute the syslog exporter's
+  local flow records). Device/link events are observable at `debug`.
+- Config lives behind the `Config` facade (`config_uci.cpp`/`config_mini.cpp`);
+  one option set, two backends.
 - Do not check in compiled `.o`/eBPF objects; build from source.
+
+## Transitional ucode files
+
+The deprecated ucode agent (`obserwrt/files/usr/share/ucode/obserwrt/`,
+`scripts/emit-test.uc`, the fw4-style `obserwrt/tests/*.uc`) is retained until
+the C++ agent flips in production. It is superseded by `src/` — do not extend
+it. ucode-specific guidance (trailing `;` on `export function`, no function
+hoisting, no `arr.push()`, `for (x in arr)` yields elements, etc.) applies only
+to those files; see `docs/design.md` §1 for the v0.2.6→C++ history.
 
 ## Do not
 
@@ -192,22 +172,18 @@ When in doubt, check the docs rather than assuming ECMAScript semantics.
 
 ## Testing (see also `.github/workflows/ci.yml`)
 
-- **goflow2 e2e** (`scripts/emit-test.uc` + `scripts/test-ipfix.sh`): emits a
-  fixed IPv4 TCP + IPv6 UDP flow via `exporter_ipfix.uc` and asserts an
-  independent collector (goflow2 via `GOFLOW2`/`docker`) decodes the expected
-  fields. Needs ucode with the struct/socket/uci/log modules to run the emitter.
-  `exporter_ipfix.connect(host, port, source_addr)` is exported so the exporter
-  can be driven directly.
-- **Unit tests** (`obserwrt/tests/run_tests.sh`): fw4-style declarative tests
-  exercise the exporter with mocked `socket`, `uci`, `log`, and `bpf` modules
-  while retaining real `struct` packing/unpacking. The mocklib and runner are
-  adapted from OpenWrt firewall4's ISC-licensed test framework; attribution is
-  retained in the copied files. Run from the repository with a local ucode
-  module glob, for example:
-  `UCODE_BIN=... UCODE_MODULES='/usr/lib/ucode/*.so' obserwrt/tests/run_tests.sh`
-  or against installed modules with
-  `MODDIR=/usr/share/ucode/obserwrt`. The tests cover IPFIX v4/v6 encoding,
-  UCI initialization, source binding, sequence numbers, and UDP chunking.
+- **goflow2 e2e** (`scripts/test-ipfix.sh`, native): builds `obserwrt-emit`
+  (`tests/emit_native.cpp`, drives the C++ `IpfixExporter`+`UdpClient` with a
+  fixed IPv4 TCP + IPv6 UDP flow) and asserts an independent collector (goflow2
+  via `GOFLOW2`/`docker`) decodes the expected fields. Run:
+  `cmake --build build --target obserwrt-emit && OBSERWRT_EMIT=$PWD/build/obserwrt-emit sh scripts/test-ipfix.sh`
+- **Golden harness** (`tests/harness.cpp`, `ctest`): pins the IPFIX v4/v6 wire
+  bytes (templates 256/257 incl. IE 152/153), the §5 key/value layouts, the
+  lifecycle delta/expiry contract, syslog JSON/logfmt/envelopes, the Prometheus
+  exposition, and both config backends, against the ucode agent's expectations.
+- **Transitional ucode tests** (`obserwrt/tests/run_tests.sh`): fw4-style
+  declarative tests for the deprecated agent; retained until the flip. Uses
+  OpenWrt's fw4 ISC-licensed mock framework; attribution retained.
 
 ## Milestones (see design §13)
 

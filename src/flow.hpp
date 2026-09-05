@@ -44,6 +44,31 @@ struct __attribute__((packed)) FlowKey {
 };
 static_assert(sizeof(FlowKey) == 46, "FlowKey must be 46 bytes");
 
+/* FlowKey is packed (no padding), so byte-wise equality is exact. */
+inline bool operator==(const FlowKey &a, const FlowKey &b)
+{
+	return std::memcmp(&a, &b, sizeof(FlowKey)) == 0;
+}
+
+inline bool operator!=(const FlowKey &a, const FlowKey &b)
+{
+	return !(a == b);
+}
+
+/* FNV-1a over the packed key bytes; hash functor for unordered_set<FlowKey>. */
+struct FlowKeyHash {
+	size_t operator()(const FlowKey &k) const
+	{
+		const uint8_t *b = reinterpret_cast<const uint8_t *>(&k);
+		size_t h = 14695981039346656037ULL; /* FNV offset basis */
+		for (size_t i = 0; i < sizeof(FlowKey); i++) {
+			h ^= b[i];
+			h *= 1099511628211ULL; /* FNV prime */
+		}
+		return h;
+	}
+};
+
 /* Flow value (40 bytes, native endian) - docs/design.md §5.2.
  * struct.pack format (little-endian): "<QQQQH6x". NOT packed: the 8-byte
  * counters are naturally aligned in-kernel (atomic increments), and the

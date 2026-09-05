@@ -8,7 +8,10 @@
 ## 1. Goal
 
 `obserwrt` is an OpenWrt-native network observation agent built around eBPF
-and ucode. It provides data-plane visibility:
+and a lightweight C++23 agent. Until v0.2.6 the agent was implemented in ucode;
+it was rewritten in C++ because of the CPU/RAM footprint of the ucode VM on
+low-end MIPS routers (the eBPF program and the normalized observation model are
+unchanged). It provides data-plane visibility:
 
 - who is communicating with whom;
 - which Linux network device traffic actually traverses;
@@ -28,10 +31,12 @@ VXLAN, physical Ethernet.
 VPN hubs, PBR, Akvorado, service identity, or whether an address is internal or
 external. That meaning belongs to downstream enrichment.
 
-**OpenWrt-native first.** v1 uses ucode, `ucode-mod-bpf`, ubus/netifd, UCI and
-procd. The eBPF programs and the normalized observation model must nonetheless
-avoid unnecessary OpenWrt-specific semantics so the same programs could be
-reused by a future general Linux agent.
+**OpenWrt-native first, portable host.** v2 uses a C++23 agent (libbpf,
+rtnetlink, libuci/libstdc++ on OpenWrt; a plain UDP/IPFIX/syslog/socket path on
+Linux), UCI/procd on OpenWrt and a systemd/.conf path on plain Linux. The eBPF
+programs and the normalized observation model must nonetheless avoid
+unnecessary OpenWrt-specific semantics so the same programs could be reused by
+a future general Linux agent.
 
 **Backend-independent internal model.** IPFIX is the first production exporter
 (Akvorado is the initial backend), but the internal flow representation must not
@@ -44,7 +49,7 @@ eBPF
 raw flow state
   │
   ▼
-ucode
+obserwrt agent (C++23)
   │
   ▼
 normalized observation
@@ -62,7 +67,7 @@ ifIndex. It must never require all configured devices to exist at startup.
 
 **Preserve the boundary:**
 
-> eBPF observes packets, ucode manages observations, exporters encode them,
+> eBPF observes packets, the agent manages observations, exporters encode them,
 > and downstream systems assign meaning.
 
 ## 3. Architecture
@@ -76,24 +81,24 @@ ifIndex. It must never require all configured devices to exist at startup.
                     eBPF programs
                          │
                          ▼
-                    BPF flow maps
-                         │
-                  ucode-mod-bpf
-                         │
-                         ▼
+BPF flow maps
+                          │
+                       libbpf
+                          │
+                          ▼
                    obserwrt agent
                   ┌──────┴──────┐
                   │             │
-            flow lifecycle   netifd/ubus
+            flow lifecycle   rtnetlink
                   │          reconciliation
                   ▼
           normalized observations
                   │
              ┌────┴─────┐
-             ▼          ▼
-           IPFIX       debug
-             │
-             ▼
+              ▼          ▼
+            IPFIX       debug
+              │
+              ▼
           Akvorado
 ```
 
@@ -272,8 +277,8 @@ re-emitted** (its delta is zero, so the record would be valueless). The pass is
 O(map size) in userspace, so this keeps per-tick work proportional to actual
 activity rather than map occupancy; on large maps (sites run up to 32k flows)
 every-tick re-export of idle flows pinned a core. The delta tracker is keyed by
-the hex of the raw map key (the 46-byte key is mostly zero bytes, which ucode
-object keys cannot hold), and pruned each pass so LRU-evicted flows do not leak
+the hex of the raw map key (the 46-byte key is mostly zero bytes, which object
+keys cannot hold directly), and pruned each pass so LRU-evicted flows do not leak
 state.
 
 Flows idle longer than their **per-protocol** timeout are exported as expired
@@ -457,24 +462,23 @@ Likely future options (only when actually needed):
 
 ```text
 obserwrt/
-├── README.md
-├── LICENSE
-├── docs/design.md
-└── obserwrt/
-    ├── Makefile
-    ├── files/etc/config/obserwrt
-    ├── files/etc/init.d/obserwrt
-    ├── files/usr/share/ucode/obserwrt/obserwrt.uc  # procd entry
-    ├── files/usr/share/ucode/obserwrt/flow.uc
-    ├── files/usr/share/ucode/obserwrt/reconcile.uc
-    ├── files/usr/share/ucode/obserwrt/lifecycle.uc
-    └── src/obserwrt-bpf.c
+├── CMakeLists.txt          # one build for OpenWrt (cmake.mk) and Linux (CPack)
+├── src/                    # C++23 agent (main, flow, lifecycle, reconcile,
+│                           #  bpf, exporter_ipfix/syslog, metrics, config_*)
+├── src/obserwrt-bpf.c      # the eBPF program (shared, unchanged)
+├── vendor/                 # 3rd-party headers (nlohmann/json, inifile-cpp)
+├── linux/                  # systemd unit + .conf for the plain-Linux .deb
+├── obserwrt/
+│   ├── Makefile            # OpenWrt package (cmake.mk + bpf.mk)
+│   └── files/obserwrt.init # procd script (flat)
+│   └── files/obserwrt.conf # UCI config (flat)
+└── tests/, scripts/        # golden harness + goflow2 e2e (native emitter)
 ```
 
-- Dependencies: `ucode`, `ucode-mod-bpf`, `ucode-mod-ubus`, `ucode-mod-struct`,
-  `ucode-mod-log`
-  (+ runtime eBPF support as needed). The eBPF object is built on-device-from-
-  source via `include/bpf.mk` (BPF toolchain), not checked in as a binary.
+- Dependencies (OpenWrt): `libbpf`, `libuci`, `libstdcpp` (+ runtime eBPF
+  support as needed). On plain Linux: `libbpf1`, `libstdc++6`. The eBPF object
+  is built on-device-from-source via `include/bpf.mk` (OpenWrt) or clang
+  (Linux CMake), not checked in as a binary.
 - procd service: starts at boot, respawns on failure, does not fail when
   configured devices are absent.
 - No auto-attach to every interface after installation.
@@ -544,7 +548,8 @@ configure a device list + IPFIX/syslog collector; start with absent devices;
 create/delete selected interfaces without restart; observe IPv4/IPv6
 TCP/UDP/ICMP on TC ingress/egress; export valid IPFIX with real kernel ifIndex;
 see the same observations via syslog; consume the flows in Akvorado/goflow2.
-Unit tests + CI (static, ucode, goflow2 e2e) are in place.
+Unit tests + CI (static, native golden harness, goflow2 e2e via the native
+emitter) are in place.
 
 ### v0.2 — in progress (dataplane correctness; released as `0.2`)
 
@@ -573,8 +578,7 @@ The aim is to make obserwrt trustworthy across the whole mesh / LAN:
   is wanted; if so add VXLAN decap parsing; confirm OSPF-underlay visibility.
 - Per-protocol/more-precise expiry and any LRU/map-sizing follow-up driven by
   the soak's measurements, not by theory.
-- **Live flow-map limit (optional; requires a small `ucode-mod-bpf` patch to
-  expose `bpf_map_info.max_entries`).** If adopted, obserwrt should detect at
-  runtime whether the module is patched (capability probe); on an unpatched
-  module it falls back to the baked build-time limit and logs a warning —
-  limited but correct functionality, no hard dependency on the patch.
+- **Live flow-map limit (done).** The C++ agent reads the real
+  `bpf_map_info.max_entries` directly via libbpf (no module patch); the map
+  size is set at load from `main.max_flows` (or the baked 4096 default), and
+  `obserwrt_bpf_map_limit` reflects the live value.

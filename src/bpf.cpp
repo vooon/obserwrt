@@ -15,6 +15,7 @@
 
 #include <cerrno>
 #include <cstring>
+#include <unordered_set>
 
 namespace obserwrt
 {
@@ -168,20 +169,37 @@ bool Bpf::snapshot_keys(std::vector<std::string> &out) const
 		return false;
 
 	const size_t ksz = bpf_map__key_size(flows_);
+	const size_t cap = bpf_map__max_entries(flows_);
 	int fd = bpf_map__fd(flows_);
 
 	std::string prev(ksz, '\0');
 	std::string next(ksz, '\0');
 	bool first = true;
 
+	/* The map is an LRU that may evict BETWEEN get_next_key() calls. When the
+	 * cursor key vanished, the kernel restarts iteration from the first key,
+	 * so a plain loop would accumulate duplicates and never terminate under
+	 * sustained churn. Bound it: never collect more than the map capacity,
+	 * and stop as soon as a key repeats (iteration restarted). FlowKey is
+	 * packed (46 B), so byte-wise equality via the set is exact. */
+	std::unordered_set<FlowKey, FlowKeyHash> seen;
+
 	for (;;) {
+		if (seen.size() >= cap)
+			return true;
+
 		const void *cur = first ? nullptr : prev.data();
 		if (bpf_map_get_next_key(fd, cur, next.data()) != 0) {
 			if (errno == ENOENT) /* end of map */
 				return true;
 			return false;
 		}
-		out.push_back(next);
+
+		std::string key(next.data(), ksz);
+		if (!seen.insert(parse_key(key)).second)
+			return true; /* cursor evicted -> kernel restarted; we are done */
+
+		out.push_back(std::move(key));
 		prev.swap(next);
 		first = false;
 	}

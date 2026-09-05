@@ -3,27 +3,19 @@
 #
 # Validates that the exporter encodes valid IPFIX which an independent
 # collector (goflow2) can decode. Sends one fixed IPv4 TCP and one IPv6 UDP flow
-# via scripts/emit-test.uc and checks goflow2 decodes the expected fields.
-#
-# Requirements: ucode with the UCI/struct/socket/log modules, and goflow2
-# (GOFLOW2 env / `goflow2` on PATH, or docker with the netsampler/goflow2 image).
-#
-# Host/CI usage: the OpenWrt-only modules (uci, bpf) aren't shipped by upstream
-# ucode, so point at a ucode build whose modules dir carries the real
-# struct/socket/log/fs and provide the mocklib for uci/bpf stubs:
-#   UCODE_BIN=<built>/ucode UCODE_MODULES=<built> \
-#   MOCKLIB=obserwrt/tests/lib/mocklib sh scripts/test-ipfix.sh
+# via the native C++ emitter (obserwrt-emit, built from tests/emit_native.cpp)
+# and checks goflow2 decodes the expected fields.
 #
 # Usage: sh scripts/test-ipfix.sh [collector_host] [collector_port]
+# Env:   OBSERWRT_EMIT=<path to obserwrt-emit>  (default: $ROOT/build/obserwrt-emit)
+#        GOFLOW2=<path to goflow2 binary>       (default: goflow2 or docker
+#                                      netsampler/goflow2 on the host)
 set -eu
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 HOST="${1:-127.0.0.1}"
 PORT="${2:-4739}"
-
-UCODE_BIN="${UCODE_BIN:-ucode}"
-UCODE_MODULES="${UCODE_MODULES:-}"
-MOCKLIB="${MOCKLIB:-$ROOT/obserwrt/tests/lib/mocklib}"
+EMIT="${OBSERWRT_EMIT:-$ROOT/build/obserwrt-emit}"
 
 SCRATCH="$(mktemp -d)"
 LOG="$SCRATCH/goflow2.log"
@@ -33,19 +25,6 @@ cleanup_docker=""
 trap 'rm -rf "$SCRATCH"; [ -n "$store_pid" ] && kill "$store_pid" 2>/dev/null || true; [ -n "$cleanup_docker" ] && docker stop "$cleanup_docker" >/dev/null 2>&1 || true' EXIT
 
 # ---- start goflow2 -----------------------------------------------------
-mkdir -p "$SCRATCH/uc"
-cp "$ROOT/scripts/emit-test.uc" \
-   "$ROOT/obserwrt/files/usr/share/ucode/obserwrt/flow.uc" \
-   "$ROOT/obserwrt/files/usr/share/ucode/obserwrt/util.uc" \
-   "$ROOT/obserwrt/files/usr/share/ucode/obserwrt/exporter_ipfix.uc" \
-   "$SCRATCH/uc/"
-
-# Upstream ucode has no OpenWrt uci/bpf modules and its log.so lacks the
-# WARN/INFO wrappers, so provide stubs (searched before UCODE_MODULES). The
-# real socket/struct/fs come from UCODE_MODULES so datagrams really are sent.
-mkdir -p "$SCRATCH/stubs"
-cp "$MOCKLIB/uci.uc" "$MOCKLIB/bpf.uc" "$MOCKLIB/log.uc" "$SCRATCH/stubs/"
-
 if [ -n "${GOFLOW2:-}" ]; then
 	$GOFLOW2 -listen "netflow://$HOST:$PORT" -format text >"$LOG" 2>&1 &
 	store_pid=$!
@@ -63,11 +42,12 @@ else
 	exit 2
 fi
 
-# ---- emit the test flows ----------------------------------------------
-uc_args="-L$SCRATCH/stubs"
-[ -n "$UCODE_MODULES" ] && uc_args="$uc_args -L$UCODE_MODULES"
-# shellcheck disable=SC2086  # $uc_args intentionally word-splits into -L flags
-COLLECTOR_HOST="$HOST" COLLECTOR_PORT="$PORT" $UCODE_BIN $uc_args "$SCRATCH/uc/emit-test.uc"
+# ---- emit the test flows (native C++ exporter) -------------------------
+if [ ! -x "$EMIT" ]; then
+	echo "test-ipfix: emitter not found at $EMIT (build obserwrt-emit first)" >&2
+	exit 2
+fi
+"$EMIT" "$HOST" "$PORT"
 
 # ---- let goflow2 flush/decode, then assert ----------------------------
 sleep 2

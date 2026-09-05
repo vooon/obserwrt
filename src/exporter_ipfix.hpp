@@ -39,6 +39,11 @@ class IpfixExporter
 	 * offset_ms = epoch_ms - mono_ms at startup and passes live timestamps. */
 	void set_epoch(uint32_t export_time_s, uint64_t offset_ms);
 
+	/* Refresh only the realtime<-monotonic anchor (call after the wall clock
+	 * is corrected, e.g. NTP, so flow flowStart/End ms follow). Does not touch
+	 * the template retransmit timer (unlike set_epoch). */
+	void set_offset_ms(uint64_t offset_ms);
+
 	/* Send the two template sets as one datagram (also at init). */
 	void send_templates(uint32_t export_time_s);
 

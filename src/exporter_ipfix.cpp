@@ -28,8 +28,8 @@ const std::vector<std::pair<uint16_t, uint16_t>> FIELDS_V4 = {
     {4, 1},   /* protocolIdentifier */
     {2, 8},   /* packetDeltaCount */
     {1, 8},   /* octetDeltaCount */
-    {150, 8}, /* flowStartMilliseconds */
-    {151, 8}, /* flowEndMilliseconds */
+    {152, 8}, /* flowStartMilliseconds */
+    {153, 8}, /* flowEndMilliseconds */
     {6, 2},   /* tcpControlBits */
     {10, 4},  /* ingressInterface */
     {14, 4},  /* egressInterface */
@@ -38,7 +38,7 @@ const std::vector<std::pair<uint16_t, uint16_t>> FIELDS_V4 = {
 const std::vector<std::pair<uint16_t, uint16_t>> FIELDS_V6 = {
     {27, 16}, /* sourceIPv6Address */
     {28, 16}, /* destinationIPv6Address */
-    {7, 2},   {11, 2}, {4, 1}, {2, 8}, {1, 8}, {150, 8}, {151, 8}, {6, 2}, {10, 4}, {14, 4},
+    {7, 2},   {11, 2}, {4, 1}, {2, 8}, {1, 8}, {152, 8}, {153, 8}, {6, 2}, {10, 4}, {14, 4},
 };
 
 } /* namespace */
@@ -57,6 +57,11 @@ void IpfixExporter::set_epoch(uint32_t export_time_s, uint64_t offset_ms)
 {
 	offset_ms_ = offset_ms;
 	last_template_sent_s_ = export_time_s;
+}
+
+void IpfixExporter::set_offset_ms(uint64_t offset_ms)
+{
+	offset_ms_ = offset_ms;
 }
 
 void IpfixExporter::put16be(std::string &b, uint16_t v)

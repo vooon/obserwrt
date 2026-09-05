@@ -220,6 +220,9 @@ static void test_ipfix_wire()
 	CHECK_EQ(r16(t, 22), (uint16_t)12);
 	CHECK_EQ(r16(t, 24), (uint16_t)8);
 	CHECK_EQ(r16(t, 26), (uint16_t)4);
+	/* IE 7/8 are flowStart/EndMilliseconds (152/153), not Seconds (150/151). */
+	CHECK_EQ(r16(t, 52), (uint16_t)152);
+	CHECK_EQ(r16(t, 56), (uint16_t)153);
 	CHECK_EQ(r16(t, 68), (uint16_t)14); /* last field: egressInterface */
 	CHECK_EQ(r16(t, 70), (uint16_t)4);
 
@@ -230,6 +233,8 @@ static void test_ipfix_wire()
 	CHECK_EQ(r16(t, 78), (uint16_t)12);
 	CHECK_EQ(r16(t, 80), (uint16_t)27); /* sourceIPv6Address */
 	CHECK_EQ(r16(t, 82), (uint16_t)16);
+	CHECK_EQ(r16(t, 108), (uint16_t)152); /* flowStartMilliseconds */
+	CHECK_EQ(r16(t, 112), (uint16_t)153); /* flowEndMilliseconds */
 
 	/* [1] v4 data record: len 75, seq 0. */
 	const std::string &v4 = d[1];

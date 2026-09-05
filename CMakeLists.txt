@@ -182,6 +182,11 @@ if(OBSEWRRT_BUILD_TESTS)
   target_link_libraries(obserwrt-harness PRIVATE obserwrt_core)
   target_compile_options(obserwrt-harness PRIVATE ${OBSEWRRT_CXX_FLAGS})
   add_test(NAME golden-vectors COMMAND obserwrt-harness)
+
+  # goflow2 e2e emitter: drives the native IpfixExporter to a collector.
+  add_executable(obserwrt-emit tests/emit_native.cpp)
+  target_link_libraries(obserwrt-emit PRIVATE obserwrt_core)
+  target_compile_options(obserwrt-emit PRIVATE ${OBSEWRRT_CXX_FLAGS})
 endif()
 
 # ---------------- CPack (.deb, Debian 13 / amd64) ----------------

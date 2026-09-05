@@ -36,7 +36,9 @@ class UdpClient
 		return fd_ >= 0;
 	}
 
-	void send(const std::string &data) const;
+	/* Send one datagram; false on failure (errno preserved) so callers can
+	 * count/log lost records. */
+	bool send(const std::string &data) const;
 
       private:
 	int fd_ = -1;

@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   goflow2-ipfix:
-    name: goflow2 IPFIX decode
+    name: goflow2 IPFIX decode (native emitter)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -20,16 +20,18 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            cmake gcc make libjson-c-dev git
+            cmake g++ make libbpf-dev clang linux-libc-dev
 
-      - uses: ./.github/actions/build-ucode
-        id: ucode
+      - name: Build the native IPFIX emitter
+        run: |
+          set -euo pipefail
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DOBSEWRRT_BUILD_TESTS=ON
+          cmake --build build -j2 --target obserwrt-emit
 
       - name: Run goflow2 IPFIX e2e (decode emitted flows)
-        # Runs scripts/emit-test.uc (real socket/struct modules) against a
-        # goflow2 collector (docker, --network host) and asserts it decodes the
-        # expected IPv4 + IPv6 flows. uci/bpf/log come from OpenWrt mocks.
+        # Runs the native obserwrt-emit (C++ IpfixExporter + UdpClient)
+        # against a goflow2 collector (docker, --network host) and asserts it
+        # decodes the expected IPv4 + IPv6 flows.
         run: |
-          UCODE_BIN="${{ steps.ucode.outputs.bin }}" \
-          UCODE_MODULES="${{ steps.ucode.outputs.mods }}" \
-            sh scripts/test-ipfix.sh
+          OBSERWRT_EMIT="$PWD/build/obserwrt-emit" sh scripts/test-ipfix.sh

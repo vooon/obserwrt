@@ -135,7 +135,10 @@ int main(int argc, char **argv)
 			DAEMON_LOG(LOG_ERR, "fatal: %s", err.c_str());
 			return 1;
 		}
-		ipfix.set_sink([&](const std::string &data) { ipfix_udp.send(data); });
+		ipfix.set_sink([&](const std::string &data) {
+			if (!ipfix_udp.send(data))
+				metrics.record_error(); /* obserwrt_export_errors_total */
+		});
 	}
 
 	const uint32_t start_s = static_cast<uint32_t>(time(nullptr));
@@ -176,14 +179,27 @@ int main(int argc, char **argv)
 
 	/* Attach/detach on rtnetlink link events (design §6; rtnetlink replaces
 	 * netifd): up|newlink -> attach with the current real ifindex, down|gone
-	 * -> detach + purge the device's flows. */
+	 * -> detach + purge the device's flows. An ifindex already attached is
+	 * reconciled by its CURRENT state and name first: a rename to a
+	 * non-matching name detaches, a matching->matching rename refreshes the
+	 * stored name. */
 	auto on_link = [&](const obserwrt::LinkEvent &ev) {
-		if (!match_device(ev.ifname, cfg.devices))
-			return;
+		const bool attached = bpf.attached(ev.ifindex);
+		const bool wanted = ev.present && ev.up && match_device(ev.ifname, cfg.devices);
 
-		if (ev.present && ev.up) {
-			if (bpf.attached(ev.ifindex))
-				return;
+		if (attached) {
+			if (!wanted) {
+				DAEMON_LOG(LOG_NOTICE, "detached %s (ifindex %u)",
+					   ev.ifname.c_str(), ev.ifindex);
+				bpf.detach(ev.ifindex);
+				bpf.purge_ifindex(ev.ifindex);
+				name_by_index.erase(ev.ifindex);
+			} else if (name_by_index[ev.ifindex] != ev.ifname) {
+				name_by_index[ev.ifindex] = ev.ifname;
+				DAEMON_LOG(LOG_NOTICE, "renamed %s (ifindex %u)", ev.ifname.c_str(),
+					   ev.ifindex);
+			}
+		} else if (wanted) {
 			if (bpf.attach(ev.ifindex, &err)) {
 				name_by_index[ev.ifindex] = ev.ifname;
 				DAEMON_LOG(LOG_NOTICE, "attached %s (ifindex %u)",
@@ -191,12 +207,6 @@ int main(int argc, char **argv)
 			} else
 				DAEMON_LOG(LOG_WARNING, "attach %s: %s", ev.ifname.c_str(),
 					   err.c_str());
-		} else if (bpf.attached(ev.ifindex)) {
-			DAEMON_LOG(LOG_NOTICE, "detached %s (ifindex %u)", ev.ifname.c_str(),
-				   ev.ifindex);
-			bpf.detach(ev.ifindex);
-			bpf.purge_ifindex(ev.ifindex);
-			name_by_index.erase(ev.ifindex);
 		}
 		refresh_names();
 	};
@@ -260,6 +270,12 @@ int main(int argc, char **argv)
 			} else if (f == t_life) {
 				drain_timer(t_life);
 				const uint32_t now_s = static_cast<uint32_t>(time(nullptr));
+				/* Refresh the realtime<-monotonic anchor each pass: if the
+				 * wall clock was corrected after startup (NTP), flow
+				 * flowStart/End ms keep up instead of staying pinned to
+				 * the boot-time offset (design §8.1 timestamps). */
+				ipfix.set_offset_ms(static_cast<uint64_t>(now_s) * 1000ULL -
+						    mono_ms());
 				uint64_t stat[4];
 				bpf.bpf_stats(stat);
 				const obserwrt::Lifecycle::Stats st = lifecycle.run(
