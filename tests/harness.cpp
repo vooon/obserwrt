@@ -411,6 +411,18 @@ static void test_lifecycle_delta()
 	CHECK(seen[0].expired);
 	CHECK_EQ(st.expired, (unsigned)1);
 	CHECK(map.m.empty());
+
+	/* Future last_seen (a packet updated the flow after this pass sampled
+	 * now): the unsigned age subtraction must not wrap into a false expiry. */
+	map.m[key] = tcp_val(7, 700, now_ns + 5000ULL * 1000000000ULL);
+	map.reset();
+	seen.clear();
+	life.run(map, collect);
+	CHECK_EQ(seen.size(), (size_t)1);
+	CHECK(!seen[0].expired);
+	CHECK(!map.m.empty());
+	CHECK_EQ(seen[0].delta.packets, (uint64_t)7); /* first sighting: cumulative */
+	CHECK_EQ(seen[0].delta.bytes, (uint64_t)700);
 }
 
 /* ---------- 02_syslog (pinned ucode tests) + config_mini ---------- */

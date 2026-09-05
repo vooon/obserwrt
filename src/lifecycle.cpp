@@ -72,7 +72,11 @@ Lifecycle::Stats Lifecycle::run(FlowMap &map, const Exporter &exporter)
 
 		const FlowValue v = parse_value(raw);
 		const std::string fk = hexenc(key);
-		const double age_s = static_cast<double>(now - v.last_seen) / 1e9;
+		/* `now` was sampled before the walk; a packet may have updated
+		 * last_seen after that, so v.last_seen can exceed now. Saturate at
+		 * zero instead of letting the unsigned subtraction wrap (~584 y). */
+		const uint64_t age_ns = now >= v.last_seen ? now - v.last_seen : 0;
+		const double age_s = static_cast<double>(age_ns) / 1e9;
 
 		const auto it = last_.find(fk);
 		const Last *prev = (it != last_.end()) ? &it->second : nullptr;

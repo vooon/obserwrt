@@ -211,8 +211,13 @@ int main(int argc, char **argv)
 		refresh_names();
 	};
 
-	if (!rec.dump(on_link, &err))
-		DAEMON_LOG(LOG_WARNING, "reconcile dump: %s", err.c_str());
+	if (!rec.dump(on_link, &err)) {
+		/* Reconciliation has no periodic rescan: a failed initial dump leaves
+		 * already-up devices unattached until an unrelated link event, so
+		 * fail hard and let procd/systemd restart into a clean reconcile. */
+		DAEMON_LOG(LOG_ERR, "fatal: reconcile dump: %s", err.c_str());
+		return 1;
+	}
 
 	if (!cfg.ipfix.enabled && !syslog_active)
 		DAEMON_LOG(LOG_WARNING, "no exporters enabled; observations will not be exported");
@@ -258,14 +263,29 @@ int main(int argc, char **argv)
 
 			if (f == rec.fd()) {
 				char buf[65536];
+				bool resync = false;
 				for (;;) {
 					ssize_t r = recv(rec.fd(), buf, sizeof(buf), 0);
+					if (r == 0)
+						break;
 					if (r < 0) {
+						if (errno == EINTR)
+							continue;
 						if (errno == EAGAIN || errno == EWOULDBLOCK)
 							break;
+						/* ENOBUFS and friends lose link notifications; a
+						 * missed down/up/rename leaves TC + names stale, so
+						 * resync from a fresh dump. */
+						DAEMON_LOG(LOG_WARNING, "netlink recv: %s",
+							   std::strerror(errno));
+						resync = true;
 						break;
 					}
 					rec.dispatch(buf, static_cast<size_t>(r), on_link);
+				}
+				if (resync) {
+					std::string derr;
+					rec.dump(on_link, &derr);
 				}
 			} else if (f == t_life) {
 				drain_timer(t_life);
