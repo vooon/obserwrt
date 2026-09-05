@@ -373,7 +373,11 @@ static void test_lifecycle_delta()
 	obserwrt::Lifecycle life(to);
 
 	const std::string key = tcp_key();
-	const uint64_t now_ns = obserwrt::Lifecycle::now_ns();
+	/* Synthetic clock: fixed well above the 301s expiry window so the
+	 * "past" last_seen cannot underflow on a freshly-booted host (real
+	 * CLOCK_MONOTONIC uptime may be < 301 s on a CI VM, which would make
+	 * `now - 301s` wrap to a huge last_seen). */
+	const uint64_t now_ns = 1ULL << 40;
 
 	MemMap map;
 	map.m[key] = tcp_val(5, 500, now_ns);
