@@ -84,7 +84,8 @@ add_library(obserwrt_core OBJECT
   src/lifecycle.cpp
   src/metrics.cpp
   src/prometheus.cpp
-  src/reconcile.cpp)
+  src/reconcile.cpp
+  src/udp_client.cpp)
 
 target_include_directories(obserwrt_core PUBLIC src)
 # Vendored third-party code (inifile-cpp, nlohmann/json) on the SYSTEM

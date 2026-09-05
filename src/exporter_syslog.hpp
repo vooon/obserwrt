@@ -12,15 +12,13 @@
 
 #pragma once
 
-#include <netinet/in.h>
-#include <sys/socket.h>
-
 #include <ctime>
 #include <functional>
 #include <string>
 
 #include "config.hpp"
 #include "flow.hpp"
+#include "udp_client.hpp"
 
 namespace obserwrt
 {
@@ -81,13 +79,9 @@ class SyslogExporter
 	SendFn sink_;
 	IfnameFn ifnames_;
 
-	int fd_ = -1;
-	sockaddr_storage addr_ = {}; /* v4 or v6 collector endpoint */
-	socklen_t addrlen_ = 0;
+	UdpClient remote_; /* remote UDP collector endpoint */
 
 	std::string deliver(const std::string &message);
-	bool connect_remote(const std::string &host, uint16_t port, const std::string &source_addr,
-			    std::string *error);
 };
 
 } /* namespace obserwrt */

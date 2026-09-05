@@ -35,6 +35,7 @@
 #include "lifecycle.hpp"
 #include "metrics.hpp"
 #include "reconcile.hpp"
+#include "udp_client.hpp"
 
 namespace
 {
@@ -75,109 +76,6 @@ bool match_device(const std::string &name, const std::vector<std::string> &pats)
 	}
 	return false;
 }
-
-/* Bind a UDP fd to a source literal in `family` (v4/v6); validates with
- * inet_pton and reports the failure via `err`. */
-bool udp_bind_source(int fd, int family, const std::string &s, std::string &err)
-{
-	if (family == AF_INET) {
-		struct sockaddr_in src;
-		std::memset(&src, 0, sizeof(src));
-		src.sin_family = AF_INET;
-		if (inet_pton(AF_INET, s.c_str(), &src.sin_addr) != 1 ||
-		    bind(fd, (struct sockaddr *)&src, sizeof(src)) < 0) {
-			err = s + ": " + std::strerror(errno);
-			return false;
-		}
-		return true;
-	}
-	if (family == AF_INET6) {
-		struct sockaddr_in6 src6;
-		std::memset(&src6, 0, sizeof(src6));
-		src6.sin6_family = AF_INET6;
-		if (inet_pton(AF_INET6, s.c_str(), &src6.sin6_addr) != 1 ||
-		    bind(fd, (struct sockaddr *)&src6, sizeof(src6)) < 0) {
-			err = s + ": " + std::strerror(errno);
-			return false;
-		}
-		return true;
-	}
-	err = "unsupported family";
-	return false;
-}
-
-/* Small UDP sender for the IPFIX exporter (mirrors exporter_syslog remote).
- * Dual-stack: the socket follows the resolved collector family (v4 or v6). */
-struct UdpOut {
-	int fd = -1;
-	struct sockaddr_storage to = {};
-	socklen_t tolen = 0;
-
-	UdpOut() = default;
-	~UdpOut()
-	{
-		if (fd >= 0)
-			::close(fd);
-	}
-	UdpOut(const UdpOut &) = delete;
-	UdpOut &operator=(const UdpOut &) = delete;
-
-	bool open(const std::string &host, uint16_t port, const std::string &source,
-		  std::string *err)
-	{
-		char portbuf[8];
-		std::snprintf(portbuf, sizeof(portbuf), "%u", port);
-
-		struct addrinfo hints;
-		std::memset(&hints, 0, sizeof(hints));
-		hints.ai_family = AF_UNSPEC;
-		hints.ai_socktype = SOCK_DGRAM;
-
-		struct addrinfo *res = nullptr;
-		if (getaddrinfo(host.c_str(), portbuf, &hints, &res) != 0 || !res) {
-			if (err)
-				*err = "ipfix: cannot resolve " + host;
-			if (res)
-				freeaddrinfo(res);
-			return false;
-		}
-
-		/* Try each resolution candidate until a socket with the optional
-		 * source bound comes up; the source must be in its family. */
-		for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
-			int s = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
-			if (s < 0)
-				continue;
-
-			if (!source.empty()) {
-				std::string berr;
-				if (!udp_bind_source(s, ai->ai_family, source, berr)) {
-					::close(s);
-					continue;
-				}
-			}
-
-			std::memcpy(&to, ai->ai_addr, ai->ai_addrlen);
-			tolen = ai->ai_addrlen;
-			fd = s;
-			freeaddrinfo(res);
-			return true;
-		}
-
-		freeaddrinfo(res);
-		if (err) {
-			*err = source.empty() ? "ipfix: no usable address for " + host
-					      : "ipfix: bind source " + source + " failed";
-		}
-		return false;
-	}
-
-	void send(const std::string &data) const
-	{
-		if (fd >= 0)
-			::sendto(fd, data.data(), data.size(), 0, (struct sockaddr *)&to, tolen);
-	}
-};
 
 int make_timer(uint32_t interval_s, std::string *err)
 {
@@ -245,14 +143,14 @@ int main(int argc, char **argv)
 	if (!syslog_err.empty())
 		DAEMON_LOG(LOG_WARNING, "syslog: %s", syslog_err.c_str());
 
-	UdpOut ipfix_sock;
+	obserwrt::UdpClient ipfix_udp;
 	if (cfg.ipfix.enabled) {
-		if (!ipfix_sock.open(cfg.ipfix.collector_host, cfg.ipfix.collector_port,
-				     cfg.ipfix.source_address, &err)) {
+		if (!ipfix_udp.connect(cfg.ipfix.collector_host, cfg.ipfix.collector_port,
+				       cfg.ipfix.source_address, &err)) {
 			DAEMON_LOG(LOG_ERR, "fatal: %s", err.c_str());
 			return 1;
 		}
-		ipfix.set_sink([&](const std::string &data) { ipfix_sock.send(data); });
+		ipfix.set_sink([&](const std::string &data) { ipfix_udp.send(data); });
 	}
 
 	const uint32_t start_s = static_cast<uint32_t>(time(nullptr));
