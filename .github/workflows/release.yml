@@ -49,7 +49,7 @@ jobs:
         run: node scripts/uc-lint.mjs
 
       - name: Download .deb
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: deb
           path: ./deb
