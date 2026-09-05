@@ -55,17 +55,19 @@ inline bool operator!=(const FlowKey &a, const FlowKey &b)
 	return !(a == b);
 }
 
-/* FNV-1a over the packed key bytes; hash functor for unordered_set<FlowKey>. */
+/* FNV-1a over the packed key bytes; hash functor for unordered_set<FlowKey>.
+ * The accumulator stays uint64_t; only the final value is truncated to
+ * size_t, so this compiles warning-clean on 32-bit targets (mipsel) as well. */
 struct FlowKeyHash {
 	size_t operator()(const FlowKey &k) const
 	{
 		const uint8_t *b = reinterpret_cast<const uint8_t *>(&k);
-		size_t h = 14695981039346656037ULL; /* FNV offset basis */
+		uint64_t h = 14695981039346656037ULL; /* FNV offset basis */
 		for (size_t i = 0; i < sizeof(FlowKey); i++) {
 			h ^= b[i];
 			h *= 1099511628211ULL; /* FNV prime */
 		}
-		return h;
+		return static_cast<size_t>(h);
 	}
 };
 
