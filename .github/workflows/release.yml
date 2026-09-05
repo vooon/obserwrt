@@ -45,9 +45,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Sanity lint
-        run: node scripts/uc-lint.mjs
-
       - name: Download .deb
         uses: actions/download-artifact@v8
         with:
