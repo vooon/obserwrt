@@ -248,12 +248,16 @@ int main(int argc, char **argv)
 		if (ev.present && ev.up) {
 			if (bpf.attached(ev.ifindex))
 				return;
-			if (bpf.attach(ev.ifindex, &err))
+			if (bpf.attach(ev.ifindex, &err)) {
 				name_by_index[ev.ifindex] = ev.ifname;
-			else
+				::syslog(LOG_NOTICE, "attached %s (ifindex %u)", ev.ifname.c_str(),
+					 ev.ifindex);
+			} else
 				::syslog(LOG_WARNING, "attach %s: %s", ev.ifname.c_str(),
 					 err.c_str());
 		} else if (bpf.attached(ev.ifindex)) {
+			::syslog(LOG_NOTICE, "detached %s (ifindex %u)", ev.ifname.c_str(),
+				 ev.ifindex);
 			bpf.detach(ev.ifindex);
 			bpf.purge_ifindex(ev.ifindex);
 			name_by_index.erase(ev.ifindex);
