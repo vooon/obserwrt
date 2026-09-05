@@ -82,7 +82,8 @@ class SyslogExporter
 	IfnameFn ifnames_;
 
 	int fd_ = -1;
-	sockaddr_in addr_ = {};
+	sockaddr_storage addr_ = {}; /* v4 or v6 collector endpoint */
+	socklen_t addrlen_ = 0;
 
 	std::string deliver(const std::string &message);
 	bool connect_remote(const std::string &host, uint16_t port, const std::string &source_addr,

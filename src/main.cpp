@@ -76,10 +76,42 @@ bool match_device(const std::string &name, const std::vector<std::string> &pats)
 	return false;
 }
 
-/* Small UDP sender for the IPFIX exporter (mirrors exporter_syslog remote). */
+/* Bind a UDP fd to a source literal in `family` (v4/v6); validates with
+ * inet_pton and reports the failure via `err`. */
+bool udp_bind_source(int fd, int family, const std::string &s, std::string &err)
+{
+	if (family == AF_INET) {
+		struct sockaddr_in src;
+		std::memset(&src, 0, sizeof(src));
+		src.sin_family = AF_INET;
+		if (inet_pton(AF_INET, s.c_str(), &src.sin_addr) != 1 ||
+		    bind(fd, (struct sockaddr *)&src, sizeof(src)) < 0) {
+			err = s + ": " + std::strerror(errno);
+			return false;
+		}
+		return true;
+	}
+	if (family == AF_INET6) {
+		struct sockaddr_in6 src6;
+		std::memset(&src6, 0, sizeof(src6));
+		src6.sin6_family = AF_INET6;
+		if (inet_pton(AF_INET6, s.c_str(), &src6.sin6_addr) != 1 ||
+		    bind(fd, (struct sockaddr *)&src6, sizeof(src6)) < 0) {
+			err = s + ": " + std::strerror(errno);
+			return false;
+		}
+		return true;
+	}
+	err = "unsupported family";
+	return false;
+}
+
+/* Small UDP sender for the IPFIX exporter (mirrors exporter_syslog remote).
+ * Dual-stack: the socket follows the resolved collector family (v4 or v6). */
 struct UdpOut {
 	int fd = -1;
-	struct sockaddr_in to;
+	struct sockaddr_storage to = {};
+	socklen_t tolen = 0;
 
 	UdpOut() = default;
 	~UdpOut()
@@ -98,7 +130,7 @@ struct UdpOut {
 
 		struct addrinfo hints;
 		std::memset(&hints, 0, sizeof(hints));
-		hints.ai_family = AF_INET;
+		hints.ai_family = AF_UNSPEC;
 		hints.ai_socktype = SOCK_DGRAM;
 
 		struct addrinfo *res = nullptr;
@@ -109,38 +141,41 @@ struct UdpOut {
 				freeaddrinfo(res);
 			return false;
 		}
-		std::memcpy(&to, res->ai_addr, sizeof(to));
-		freeaddrinfo(res);
 
-		fd = socket(AF_INET, SOCK_DGRAM, 0);
-		if (fd < 0) {
-			if (err)
-				*err = "ipfix: socket create failed";
-			return false;
-		}
+		/* Try each resolution candidate until a socket with the optional
+		 * source bound comes up; the source must be in its family. */
+		for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
+			int s = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+			if (s < 0)
+				continue;
 
-		if (!source.empty()) {
-			struct sockaddr_in src;
-			std::memset(&src, 0, sizeof(src));
-			src.sin_family = AF_INET;
-			if (inet_pton(AF_INET, source.c_str(), &src.sin_addr) != 1 ||
-			    bind(fd, (struct sockaddr *)&src, sizeof(src)) < 0) {
-				if (err)
-					*err = "ipfix: bind source " + source +
-					       " failed: " + std::strerror(errno);
-				::close(fd);
-				fd = -1;
-				return false;
+			if (!source.empty()) {
+				std::string berr;
+				if (!udp_bind_source(s, ai->ai_family, source, berr)) {
+					::close(s);
+					continue;
+				}
 			}
+
+			std::memcpy(&to, ai->ai_addr, ai->ai_addrlen);
+			tolen = ai->ai_addrlen;
+			fd = s;
+			freeaddrinfo(res);
+			return true;
 		}
-		return true;
+
+		freeaddrinfo(res);
+		if (err) {
+			*err = source.empty() ? "ipfix: no usable address for " + host
+					      : "ipfix: bind source " + source + " failed";
+		}
+		return false;
 	}
 
 	void send(const std::string &data) const
 	{
 		if (fd >= 0)
-			::sendto(fd, data.data(), data.size(), 0, (struct sockaddr *)&to,
-				 sizeof(to));
+			::sendto(fd, data.data(), data.size(), 0, (struct sockaddr *)&to, tolen);
 	}
 };
 

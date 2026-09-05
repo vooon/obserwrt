@@ -111,15 +111,42 @@ std::string sys_hostname()
 		return "";
 	char buf[129];
 	size_t n = std::fread(buf, 1, sizeof(buf) - 1, f);
-	/* fread officially returns a short count rather than -1 on error, but be
-	 * defensive: a (size_t)-1/erroneous read would make buf[n-1] OOB. */
-	if (n == static_cast<size_t>(-1) || std::ferror(f))
-		n = 0;
 	std::fclose(f);
 	while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r'))
 		n--;
 	buf[n] = '\0';
 	return std::string(buf, n);
+}
+
+/* Bind a UDP socket to the given source literal in `family` (v4 or v6).
+ * inet_pton validates the literal; INADDR_NONE-style sentinels would miss
+ * truncated forms like "192.0.2.". */
+bool bind_source(int fd, int family, const std::string &s, std::string &err)
+{
+	if (family == AF_INET) {
+		struct sockaddr_in src;
+		std::memset(&src, 0, sizeof(src));
+		src.sin_family = AF_INET;
+		if (inet_pton(AF_INET, s.c_str(), &src.sin_addr) != 1 ||
+		    bind(fd, (struct sockaddr *)&src, sizeof(src)) < 0) {
+			err = s + ": " + std::strerror(errno);
+			return false;
+		}
+		return true;
+	}
+	if (family == AF_INET6) {
+		struct sockaddr_in6 src6;
+		std::memset(&src6, 0, sizeof(src6));
+		src6.sin6_family = AF_INET6;
+		if (inet_pton(AF_INET6, s.c_str(), &src6.sin6_addr) != 1 ||
+		    bind(fd, (struct sockaddr *)&src6, sizeof(src6)) < 0) {
+			err = s + ": " + std::strerror(errno);
+			return false;
+		}
+		return true;
+	}
+	err = "unsupported family";
+	return false;
 }
 
 } /* namespace */
@@ -132,48 +159,46 @@ bool SyslogExporter::connect_remote(const std::string &host, uint16_t port,
 
 	struct addrinfo hints;
 	std::memset(&hints, 0, sizeof(hints));
-	hints.ai_family = AF_INET;
+	hints.ai_family = AF_UNSPEC; /* dual-stack: IPv4 or IPv6 collector */
 	hints.ai_socktype = SOCK_DGRAM;
 
 	struct addrinfo *res = nullptr;
 	if (getaddrinfo(host.c_str(), portbuf, &hints, &res) != 0 || !res) {
-		if (error) {
+		if (error)
 			*error = "syslog: cannot resolve " + host;
-		}
 		if (res)
 			freeaddrinfo(res);
 		return false;
 	}
 
-	fd_ = socket(AF_INET, SOCK_DGRAM, 0);
-	if (fd_ < 0) {
-		if (error)
-			*error = "syslog: socket create failed";
-		freeaddrinfo(res);
-		return false;
-	}
+	/* Try each resolution candidate until one yields a socket with the
+	 * optional source bound (the source must be in the candidate's family). */
+	for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
+		int fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+		if (fd < 0)
+			continue;
 
-	if (!source_addr.empty()) {
-		struct sockaddr_in src;
-		std::memset(&src, 0, sizeof(src));
-		src.sin_family = AF_INET;
-		/* inet_pton validates the literal; INADDR_NONE-style sentinels do not
-		 * catch e.g. "192.0.2." truncation. */
-		if (inet_pton(AF_INET, source_addr.c_str(), &src.sin_addr) != 1 ||
-		    bind(fd_, (struct sockaddr *)&src, sizeof(src)) < 0) {
-			if (error)
-				*error = "syslog: bind source " + source_addr +
-					 " failed: " + std::strerror(errno);
-			close(fd_);
-			fd_ = -1;
-			freeaddrinfo(res);
-			return false;
+		if (!source_addr.empty()) {
+			std::string cerr;
+			if (!bind_source(fd, ai->ai_family, source_addr, cerr)) {
+				close(fd);
+				continue;
+			}
 		}
+
+		fd_ = fd;
+		std::memcpy(&addr_, ai->ai_addr, ai->ai_addrlen);
+		addrlen_ = ai->ai_addrlen;
+		freeaddrinfo(res);
+		return true;
 	}
 
-	std::memcpy(&addr_, res->ai_addr, sizeof(addr_));
 	freeaddrinfo(res);
-	return true;
+	if (error) {
+		*error = source_addr.empty() ? "syslog: no usable address for " + host
+					     : "syslog: bind source " + source_addr + " failed";
+	}
+	return false;
 }
 
 bool SyslogExporter::init(const Config::Syslog &cfg, std::string *error)
@@ -335,8 +360,7 @@ void SyslogExporter::emit(const FlowKey &k, const FlowValue &v, bool expired, co
 		return;
 	}
 	if (fd_ >= 0) {
-		sendto(fd_, framed.data(), framed.size(), 0, (struct sockaddr *)&addr_,
-		       sizeof(addr_));
+		sendto(fd_, framed.data(), framed.size(), 0, (struct sockaddr *)&addr_, addrlen_);
 	}
 }
 
