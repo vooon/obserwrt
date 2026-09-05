@@ -12,6 +12,7 @@
  * removal, so the harness must run on a plain C++ toolchain (CI, hosts).
  */
 
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -66,20 +67,20 @@ std::string v4in6(uint8_t a, uint8_t b, uint8_t c, uint8_t d)
 }
 
 /* Big-endian decoders for datagram inspection. */
-uint16_t r16(const std::string &s, size_t o)
+uint16_t r16(const std::vector<std::byte> &s, size_t o)
 {
 	return static_cast<uint16_t>((static_cast<uint16_t>((uint8_t)s[o]) << 8) |
 				     (uint8_t)s[o + 1]);
 }
 
-uint32_t r32(const std::string &s, size_t o)
+uint32_t r32(const std::vector<std::byte> &s, size_t o)
 {
 	return (static_cast<uint32_t>((uint8_t)s[o]) << 24) |
 	       (static_cast<uint32_t>((uint8_t)s[o + 1]) << 16) |
 	       (static_cast<uint32_t>((uint8_t)s[o + 2]) << 8) | (uint8_t)s[o + 3];
 }
 
-uint64_t r64(const std::string &s, size_t o)
+uint64_t r64(const std::vector<std::byte> &s, size_t o)
 {
 	uint64_t v = 0;
 	for (int i = 0; i < 8; i++)
@@ -87,23 +88,36 @@ uint64_t r64(const std::string &s, size_t o)
 	return v;
 }
 
+uint8_t u8(const std::vector<std::byte> &s, size_t o)
+{
+	return static_cast<uint8_t>(s[o]);
+}
+
 /* In-memory FlowMap mirroring the map API used by the daemon's lifecycle.
- * Iteration snapshots the current keys (like the libbpf batch walk in the
- * daemon), so deleting a flow mid-pass is safe. reset() before each pass. */
+ * Iteration snapshots the current keys (like the libbpf walk in the daemon),
+ * so deleting a flow mid-pass is safe. reset() before each pass. Keys are the
+ * native §5 structs (flow.hpp), byte-compared like the packed map key. */
+struct flow_key_less {
+	bool operator()(const FK &a, const FK &b) const
+	{
+		return std::memcmp(&a, &b, sizeof(FK)) < 0;
+	}
+};
+
 struct MemMap : obserwrt::FlowMap {
-	std::map<std::string, std::string> m;
-	std::vector<std::string> keys_;
+	std::map<FK, FV, flow_key_less> m;
+	std::vector<FK> keys_;
 	size_t pos_ = 0;
 	bool snapshot_ = false;
 
-	void reset()
+	void reset() override
 	{
 		keys_.clear();
 		pos_ = 0;
 		snapshot_ = false;
 	}
 
-	bool next_key(std::string &key) override
+	bool next_key(FK &key) override
 	{
 		if (!snapshot_) {
 			snapshot_ = true;
@@ -116,7 +130,7 @@ struct MemMap : obserwrt::FlowMap {
 		return true;
 	}
 
-	bool get(const std::string &key, std::string &value) override
+	bool get(const FK &key, FV &value) override
 	{
 		const auto it = m.find(key);
 		if (it == m.end())
@@ -125,7 +139,7 @@ struct MemMap : obserwrt::FlowMap {
 		return true;
 	}
 
-	bool delete_key(const std::string &key) override
+	bool delete_key(const FK &key) override
 	{
 		return m.erase(key) > 0;
 	}
@@ -205,7 +219,7 @@ static void test_ipfix_wire()
 	CHECK_EQ(d.size(), (size_t)3);
 
 	/* [0] templates: len 128, version 10, exportTime, seq 0, domain 1. */
-	const std::string &t = d[0];
+	const auto &t = d[0];
 	CHECK_EQ(t.size(), (size_t)128);
 	CHECK_EQ(r16(t, 0), (uint16_t)10);
 	CHECK_EQ(r16(t, 2), (uint16_t)128);
@@ -237,7 +251,7 @@ static void test_ipfix_wire()
 	CHECK_EQ(r16(t, 112), (uint16_t)153); /* flowEndMilliseconds */
 
 	/* [1] v4 data record: len 75, seq 0. */
-	const std::string &v4 = d[1];
+	const auto &v4 = d[1];
 	CHECK_EQ(v4.size(), (size_t)75);
 	CHECK_EQ(r32(v4, 8), (uint32_t)0);	     /* seq */
 	CHECK_EQ(r16(v4, 16), (uint16_t)256);	     /* data set id */
@@ -246,7 +260,7 @@ static void test_ipfix_wire()
 	CHECK_EQ(r32(v4, 24), (uint32_t)0xc6336402); /* 198.51.100.2 */
 	CHECK_EQ(r16(v4, 28), (uint16_t)12345);
 	CHECK_EQ(r16(v4, 30), (uint16_t)80);
-	CHECK_EQ((uint8_t)v4[32], (uint8_t)6);
+	CHECK_EQ(u8(v4, 32), (uint8_t)6);
 	CHECK_EQ(r64(v4, 33), (uint64_t)10);
 	CHECK_EQ(r64(v4, 41), (uint64_t)12340);
 	CHECK_EQ(r64(v4, 49), (uint64_t)3313767257000ULL);
@@ -256,7 +270,7 @@ static void test_ipfix_wire()
 	CHECK_EQ(r32(v4, 71), (uint32_t)29);   /* egressInterface */
 
 	/* [2] v6 data record: len 99, seq 1, ingress 30. */
-	const std::string &v6 = d[2];
+	const auto &v6 = d[2];
 	CHECK_EQ(v6.size(), (size_t)99);
 	CHECK_EQ(r32(v6, 8), (uint32_t)1);
 	CHECK_EQ(r16(v6, 16), (uint16_t)257);
@@ -265,7 +279,7 @@ static void test_ipfix_wire()
 	CHECK(std::memcmp(v6.data() + 36, s2, 16) == 0); /* 2001:db8::2 */
 	CHECK_EQ(r16(v6, 52), (uint16_t)53);
 	CHECK_EQ(r16(v6, 54), (uint16_t)443);
-	CHECK_EQ((uint8_t)v6[56], (uint8_t)17);
+	CHECK_EQ(u8(v6, 56), (uint8_t)17);
 	CHECK_EQ(r64(v6, 57), (uint64_t)2);
 	CHECK_EQ(r64(v6, 65), (uint64_t)200);
 	CHECK_EQ(r64(v6, 73), (uint64_t)3313767257000ULL);
@@ -275,10 +289,13 @@ static void test_ipfix_wire()
 	CHECK_EQ(r32(v6, 95), (uint32_t)0);  /* egressInterface */
 }
 
-/* ---------- §5 key/value layouts <...> ---------- */
+/* ---------- §5 key/value layouts (pinned by bpf/obserwrt-flow.h) ---------- */
 
 static void test_key_value_layouts()
 {
+	/* The §5 layouts are native structs shared with the BPF map; sizes and key
+	 * offsets are asserted in the shared header. Here we pin the field layout
+	 * in bytes (host-endian) so a layout drift is caught as a harness diff. */
 	FK k{};
 	k.ifindex = 29;
 	k.direction = obserwrt::EGRESS;
@@ -289,30 +306,31 @@ static void test_key_value_layouts()
 	k.sport = 12345;
 	k.dport = 80;
 
-	const std::string pk = obserwrt::pack_key(k);
-	CHECK_EQ(pk.size(), (size_t)46);
-	/* ifindex 29 LE, direction 1, family 4, proto 6, reserved 0. */
-	const uint8_t lead[] = {0x1d, 0x00, 0x00, 0x00, 0x01, 0x04, 0x06, 0x00};
-	CHECK(std::memcmp(pk.data(), lead, sizeof(lead)) == 0);
+	const auto *kp = reinterpret_cast<const uint8_t *>(&k);
+	CHECK_EQ(kp[0], (uint8_t)0x1d); /* ifindex 29 LE (host-endian) */
+	CHECK_EQ(kp[1], (uint8_t)0x00);
+	CHECK_EQ(kp[4], (uint8_t)0x01); /* direction */
+	CHECK_EQ(kp[5], (uint8_t)0x04); /* family */
+	CHECK_EQ(kp[6], (uint8_t)0x06); /* protocol */
+	CHECK_EQ(kp[7], (uint8_t)0x00); /* reserved */
 	/* src starts at byte 8: 10 zero bytes, ff ff, c0 00 02 01. */
 	const uint8_t exp_src[16] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 				     0x00, 0x00, 0xff, 0xff, 0xc0, 0x00, 0x02, 0x01};
-	CHECK(std::memcmp(pk.data() + 8, exp_src, 16) == 0);
+	CHECK(std::memcmp(kp + 8, exp_src, 16) == 0);
 	const uint8_t exp_dst[16] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 				     0x00, 0x00, 0xff, 0xff, 0xc6, 0x33, 0x64, 0x02};
-	CHECK(std::memcmp(pk.data() + 24, exp_dst, 16) == 0);
-	CHECK_EQ((uint8_t)pk[40], (uint8_t)0x39); /* sport 12345 LE */
-	CHECK_EQ((uint8_t)pk[41], (uint8_t)0x30);
-	CHECK_EQ((uint8_t)pk[42], (uint8_t)0x50); /* dport 80 LE */
-	CHECK_EQ((uint8_t)pk[43], (uint8_t)0x00);
-	CHECK_EQ((uint8_t)pk[44], (uint8_t)0x00); /* icmp_type */
-	CHECK_EQ((uint8_t)pk[45], (uint8_t)0x00); /* icmp_code */
+	CHECK(std::memcmp(kp + 24, exp_dst, 16) == 0);
+	CHECK_EQ(kp[40], (uint8_t)0x39); /* sport 12345 LE */
+	CHECK_EQ(kp[41], (uint8_t)0x30);
+	CHECK_EQ(kp[42], (uint8_t)0x50); /* dport 80 LE */
+	CHECK_EQ(kp[43], (uint8_t)0x00);
+	CHECK_EQ(kp[44], (uint8_t)0x00); /* icmp_type */
+	CHECK_EQ(kp[45], (uint8_t)0x00); /* icmp_code */
 
-	/* Round-trip parse. */
-	const FK k2 = obserwrt::parse_key(pk);
-	CHECK_EQ(k2.ifindex, (uint32_t)29);
-	CHECK_EQ(k2.direction, (uint8_t)1);
-	CHECK_EQ(k2.sport, (uint16_t)12345);
+	/* Direct member access matches the raw layout. */
+	CHECK_EQ(k.ifindex, (uint32_t)29);
+	CHECK_EQ(k.direction, (uint8_t)1);
+	CHECK_EQ(k.sport, (uint16_t)12345);
 
 	FV v{};
 	v.packets = 10;
@@ -321,27 +339,25 @@ static void test_key_value_layouts()
 	v.last_seen = 1700006000000000000ULL;
 	v.tcp_flags = 0x18;
 
-	const std::string pv = obserwrt::pack_value(v);
-	CHECK_EQ(pv.size(), (size_t)40);
-	CHECK_EQ((uint8_t)pv[0], (uint8_t)0x0a); /* packets LE */
-	CHECK_EQ((uint8_t)pv[8], (uint8_t)0x34); /* bytes 12340 = 0x3034 */
-	CHECK_EQ((uint8_t)pv[9], (uint8_t)0x30);
-	CHECK_EQ((uint8_t)pv[32], (uint8_t)0x18); /* tcp_flags */
-	CHECK_EQ((uint8_t)pv[33], (uint8_t)0x00);
+	const auto *vp = reinterpret_cast<const uint8_t *>(&v);
+	CHECK_EQ(vp[0], (uint8_t)0x0a); /* packets LE */
+	CHECK_EQ(vp[8], (uint8_t)0x34); /* bytes 12340 = 0x3034 */
+	CHECK_EQ(vp[9], (uint8_t)0x30);
+	CHECK_EQ(vp[32], (uint8_t)0x18); /* tcp_flags */
+	CHECK_EQ(vp[33], (uint8_t)0x00);
 	for (int i = 34; i < 40; i++)
-		CHECK_EQ((uint8_t)pv[i], (uint8_t)0x00); /* trailing pad */
+		CHECK_EQ(vp[i], (uint8_t)0x00); /* trailing pad */
 
-	const FV v2 = obserwrt::parse_value(pv);
-	CHECK_EQ(v2.packets, (uint64_t)10);
-	CHECK_EQ(v2.bytes, (uint64_t)12340);
-	CHECK_EQ(v2.first_seen, (uint64_t)1700000000000000000ULL);
-	CHECK_EQ(v2.last_seen, (uint64_t)1700006000000000000ULL);
-	CHECK_EQ(v2.tcp_flags, (uint16_t)0x18);
+	CHECK_EQ(v.packets, (uint64_t)10);
+	CHECK_EQ(v.bytes, (uint64_t)12340);
+	CHECK_EQ(v.first_seen, (uint64_t)1700000000000000000ULL);
+	CHECK_EQ(v.last_seen, (uint64_t)1700006000000000000ULL);
+	CHECK_EQ(v.tcp_flags, (uint16_t)0x18);
 }
 
 /* ---------- 04_lifecycle/01_delta (pinned ucode test) ---------- */
 
-static std::string tcp_key()
+static FK tcp_key()
 {
 	FK k{};
 	k.ifindex = 1;
@@ -352,10 +368,10 @@ static std::string tcp_key()
 	std::memcpy(k.dst, v4in6(198, 51, 100, 2).data(), 16);
 	k.sport = 12345;
 	k.dport = 443;
-	return obserwrt::pack_key(k);
+	return k;
 }
 
-static std::string tcp_val(uint64_t pkts, uint64_t bytes, uint64_t last_ns)
+static FV tcp_val(uint64_t pkts, uint64_t bytes, uint64_t last_ns)
 {
 	FV v{};
 	v.packets = pkts;
@@ -363,7 +379,7 @@ static std::string tcp_val(uint64_t pkts, uint64_t bytes, uint64_t last_ns)
 	v.first_seen = 1;
 	v.last_seen = last_ns;
 	v.tcp_flags = 0x18;
-	return obserwrt::pack_value(v);
+	return v;
 }
 
 static void test_lifecycle_delta()
@@ -372,7 +388,7 @@ static void test_lifecycle_delta()
 	to.tcp = 300;
 	obserwrt::Lifecycle life(to);
 
-	const std::string key = tcp_key();
+	const FK key = tcp_key();
 	/* Synthetic clock: fixed well above the 301s expiry window so the
 	 * "past" last_seen cannot underflow on a freshly-booted host (real
 	 * CLOCK_MONOTONIC uptime may be < 301 s on a CI VM, which would make

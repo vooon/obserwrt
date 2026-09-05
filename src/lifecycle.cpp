@@ -9,26 +9,10 @@
 #include "lifecycle.hpp"
 
 #include <ctime>
+#include <unordered_set>
 
 namespace obserwrt
 {
-
-namespace
-{
-
-std::string hexenc(const std::string &b)
-{
-	static const char digits[] = "0123456789abcdef";
-	std::string out;
-	out.reserve(b.size() * 2);
-	for (unsigned char c : b) {
-		out.push_back(digits[c >> 4]);
-		out.push_back(digits[c & 0x0f]);
-	}
-	return out;
-}
-
-} /* namespace */
 
 uint64_t Lifecycle::now_ns()
 {
@@ -55,29 +39,25 @@ uint64_t Lifecycle::proto_timeout(uint8_t proto) const
 Lifecycle::Stats Lifecycle::run(FlowMap &map, const Exporter &exporter, uint64_t now)
 {
 	Stats n;
-	std::unordered_set<std::string> seen;
+	std::unordered_set<FlowKey, FlowKeyHash> seen;
 
 	map.reset(); /* re-snapshot current keys (libbpf batch-walk semantics) */
 
-	std::string key;
-	std::string raw;
+	FlowKey key;
+	FlowValue v;
 
 	while (map.next_key(key)) {
-		const FlowKey k = parse_key(key);
-
 		/* The key may have been LRU-evicted between iteration and the read. */
-		if (!map.get(key, raw))
+		if (!map.get(key, v))
 			continue;
 
-		const FlowValue v = parse_value(raw);
-		const std::string fk = hexenc(key);
 		/* `now` was sampled before the walk; a packet may have updated
 		 * last_seen after that, so v.last_seen can exceed now. Saturate at
 		 * zero instead of letting the unsigned subtraction wrap (~584 y). */
 		const uint64_t age_ns = now >= v.last_seen ? now - v.last_seen : 0;
 		const double age_s = static_cast<double>(age_ns) / 1e9;
 
-		const auto it = last_.find(fk);
+		const auto it = last_.find(key);
 		const Last *prev = (it != last_.end()) ? &it->second : nullptr;
 
 		const uint64_t p0 = prev ? prev->packets : 0;
@@ -94,20 +74,20 @@ Lifecycle::Stats Lifecycle::run(FlowMap &map, const Exporter &exporter, uint64_t
 		const bool changed = !prev || v.last_seen != prev->last_seen ||
 				     v.packets != prev->packets || v.bytes != prev->bytes;
 
-		seen.insert(fk);
-		last_[fk] = Last{v.packets, v.bytes, v.last_seen};
+		seen.insert(key);
+		last_[key] = Last{v.packets, v.bytes, v.last_seen};
 
 		const Delta delta{static_cast<uint64_t>(dp), static_cast<uint64_t>(db)};
 
-		if (age_s > static_cast<double>(proto_timeout(k.protocol))) {
-			exporter(k, v, true, delta);
-			last_.erase(fk);
+		if (age_s > static_cast<double>(proto_timeout(key.protocol))) {
+			exporter(key, v, true, delta);
+			last_.erase(key);
 			map.delete_key(key);
 			n.expired++;
 		} else {
 			n.active++;
 			if (changed)
-				exporter(k, v, false, delta);
+				exporter(key, v, false, delta);
 		}
 
 		n.map++;

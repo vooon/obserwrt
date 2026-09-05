@@ -6,8 +6,8 @@
  * host -> one connected UDP socket for the daemon lifetime, RFC 5424 framing
  * with `obserwrt` as the application name (docs/design.md §8.2).
  *
- * Encoding primitives are static so the golden-vector harness can pin them
- * against the ucode exporter's expected output.
+ * The exporter owns its transport (UdpClient remote_); tests exercise the
+ * static encoders directly, so there is no injected Sink seam.
  */
 
 #pragma once
@@ -26,16 +26,9 @@ namespace obserwrt
 class SyslogExporter
 {
       public:
-	using SendFn = std::function<void(const std::string &)>;
 	using IfnameFn = std::function<std::string(uint32_t)>;
 
 	SyslogExporter() = default;
-
-	/* Test sink / socket override. */
-	void set_sink(SendFn sink)
-	{
-		sink_ = std::move(sink);
-	}
 
 	/* ifindex -> netdev name (reconcile provides the map); default = the
 	 * numeric ifindex, matching the ucode exporter's ifname() fallback. */
@@ -44,13 +37,20 @@ class SyslogExporter
 		ifnames_ = std::move(fn);
 	}
 
-	/* Enable from the exporter_syslog config section. Returns true when the
-	 * exporter becomes active. */
+	/* Enable from the exporter_syslog config section; connects remote_ when
+	 * a remote syslog_host is configured. */
 	bool init(const Config::Syslog &cfg, std::string *error);
 
 	bool active() const
 	{
 		return enabled_;
+	}
+
+	/* Failed sends since the last take (remote mode; local syslog(3) never
+	 * fails). Folded into the export error metric by the daemon. */
+	unsigned long take_failures()
+	{
+		return remote_.take_failures();
 	}
 
 	/* Emit one observation (delta supplied by the lifecycle; fallback to
@@ -76,12 +76,8 @@ class SyslogExporter
 	bool local_ = false;
 	std::string format_ = "json";
 	std::string host_ = ""; /* RFC 5424 HOSTNAME */
-	SendFn sink_;
+	UdpClient remote_;	/* remote UDP collector endpoint */
 	IfnameFn ifnames_;
-
-	UdpClient remote_; /* remote UDP collector endpoint */
-
-	std::string deliver(const std::string &message);
 };
 
 } /* namespace obserwrt */

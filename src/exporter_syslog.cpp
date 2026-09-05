@@ -9,6 +9,7 @@
 #include "exporter_syslog.hpp"
 
 #include "log.hpp"
+#include "logfmt.hpp"
 
 /* nlohmann/json (vendored, MIT). Compiled exceptions-free (JSON_NOEXCEPTION);
  * only serialization is used here, so error paths compile out. */
@@ -255,13 +256,6 @@ std::string SyslogExporter::frame(const std::string &message, const std::string 
 	return out;
 }
 
-std::string SyslogExporter::deliver(const std::string &message)
-{
-	if (sink_)
-		sink_(message);
-	return message;
-}
-
 void SyslogExporter::emit(const FlowKey &k, const FlowValue &v, bool expired, const Delta *delta)
 {
 	if (!enabled_)
@@ -276,10 +270,10 @@ void SyslogExporter::emit(const FlowKey &k, const FlowValue &v, bool expired, co
 	}
 
 	const std::string framed = frame(payload, host_, time(nullptr));
-	if (sink_)
-		sink_(framed);
-	else if (!remote_.send(framed))
-		DAEMON_LOG(LOG_WARNING, "syslog: send failed (%s)", std::strerror(errno));
+	const auto span =
+	    std::span(reinterpret_cast<const std::byte *>(framed.data()), framed.size());
+	if (!remote_.send(span))
+		SLOG(LOG_WARNING, "syslog send failed")("error", std::strerror(errno));
 }
 
 } /* namespace obserwrt */

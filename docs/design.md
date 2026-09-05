@@ -8,10 +8,10 @@
 ## 1. Goal
 
 `obserwrt` is an OpenWrt-native network observation agent built around eBPF
-and a lightweight C++23 agent. Until v0.2.6 the agent was implemented in ucode;
-it was rewritten in C++ because of the CPU/RAM footprint of the ucode VM on
-low-end MIPS routers (the eBPF program and the normalized observation model are
-unchanged). It provides data-plane visibility:
+and a lightweight C++23 agent. It was introduced as a ucode agent; the ucode
+VM's CPU/RAM footprint on low-end MIPS routers drove a rewrite in C++ (v0.2.6)
+where the eBPF program and the normalized observation model stayed unchanged,
+and the ucode implementation was removed. It provides data-plane visibility:
 
 - who is communicating with whom;
 - which Linux network device traffic actually traverses;
@@ -176,9 +176,11 @@ future parser extension, not planned for v1.
 | icmp_type | 44     | `u8`      | 1     |
 | icmp_code | 45     | `u8`      | 1     |
 
-`struct`/`pack` format (little-endian targets): `"<LBBBx16s16sHHBB"`.
-Big-endian targets use the `>` prefix. The leading reserved byte keeps `src` and
-`dst` 4-byte aligned within the packed struct.
+The structs live once in `bpf/obserwrt-flow.h`, shared by the eBPF program and
+the C++ agent (`flow.hpp` types them as `FlowKey`/`FlowValue`). Native byte
+order on the local machine — the map is written and read on the same host.
+The reported byte offsets above are the `_Static_assert`-pinned layout; the
+reserved byte keeps `src` and `dst` 4-byte aligned within the packed struct.
 
 `direction` is 0 for ingress, 1 for egress. `family` and `protocol` are 8-bit
 (the IP protocol number and address family are both ≤ 255), avoiding wasted 32-bit
@@ -189,10 +191,8 @@ are 0 for ICMP.
 ### 5.2 Flow value (40 bytes, native endian)
 
 The value keeps the `u64` counters **naturally aligned** (the 8-byte fields must
-be 8-byte aligned so atomic increments are valid in BPF), so the packed/`struct`
+be 8-byte aligned so atomic increments are valid in BPF), so the `struct`
 size is 40 bytes (8×4 counters + a 16-bit `tcp_flags` + 6 trailing pad).
-
-`struct`/`pack` format (little-endian targets): `"<QQQQH6x"`.
 
 | field      | struct | width |
 |------------|--------|-------|
@@ -268,8 +268,8 @@ point we would select.
 Packet: `lookup(key)` → `create/update` → `packets++`, `bytes += len`,
 `last_seen = now`, accumulate `tcp_flags`. Userspace periodically reads the map.
 
-Each pass hands the exporter the **delta** since the last export
-(`lifecycle.uc` tracks last-exported counters per flow key), so active flows
+Each pass hands the exporter the **delta** since the last export (the C++
+`Lifecycle` tracks last-exported counters per flow key), so active flows
 contribute their interval growth rather than cumulative totals — the sum of
 deltas over a flow's lifetime equals its total, and the collector is not
 double-counted. A flow with **no new traffic since the last pass is not
@@ -277,9 +277,8 @@ re-emitted** (its delta is zero, so the record would be valueless). The pass is
 O(map size) in userspace, so this keeps per-tick work proportional to actual
 activity rather than map occupancy; on large maps (sites run up to 32k flows)
 every-tick re-export of idle flows pinned a core. The delta tracker is keyed by
-the hex of the raw map key (the 46-byte key is mostly zero bytes, which object
-keys cannot hold directly), and pruned each pass so LRU-evicted flows do not leak
-state.
+the packed `FlowKey` struct (hash functor over the raw 46 bytes), and pruned
+each pass so LRU-evicted flows do not leak state.
 
 Flows idle longer than their **per-protocol** timeout are exported as expired
 and deleted from the map (timeouts configurable, see §10):
@@ -310,8 +309,9 @@ is not required.
   observation domain, periodic template retransmission, batching multiple
   records per datagram, datagram sizing safely below ~1400 bytes unless
   configurable otherwise.
-- Wire encoding with `struct.buffer()` / precompiled `struct.new('!…')`
-  (network/big-endian, no padding).
+- Wire encoding is big-endian (network byte order, no padding): the C++
+  exporter builds `std::byte` datagram buffers with `std::byteswap` appenders
+  and hands them to the owned UDP socket as spans.
 - Two templates branching on the `::ffff:` prefix:
   - mapped `::ffff:*` → `sourceIPv4Address`/`destinationIPv4Address`
     (emitting only the final 4 bytes);
@@ -399,13 +399,13 @@ two sources, split honestly between BPF truth and userspace:
   `obserwrt_bpf_map_limit` (baked to the built map size), `obserwrt_devices_attached`,
   and per-netdev `obserwrt_device_attached{ifname="..."}`.
 
-Metrics are published via the **Prometheus textfile collector**: `metrics.uc`
-writes a `.prom` file atomically (temp file + rename, all-or-nothing) that a
-node-exporter instance scrapes. obserwrt does **not** implement an HTTP server.
-Formatting (labels, escaping, govalue, decl) is adapted from node-exporter's
-ucode metrics abstraction. The feature is enabled by setting
+Metrics are published via the **Prometheus textfile collector**: the C++
+`metrics` module writes a `.prom` file atomically (temp file + rename,
+all-or-nothing) that a node-exporter instance scrapes. obserwrt does **not**
+implement an HTTP server. Formatting (labels, escaping) uses the internal
+`prometheus` exposition builder. The feature is enabled by setting
 `main.prometheus_textfile` to a writable path; `main.prometheus_interval`
-(default 20s) is the cadence of a dedicated uloop timer that rewrites the file,
+(default 20s) is the cadence of a dedicated timer that rewrites the file,
 independent of the 5s lifecycle flush.
 
 The flow map is an **LRU hash**, so at capacity it evicts rather than failing;
@@ -465,7 +465,9 @@ obserwrt/
 ├── CMakeLists.txt          # one build for OpenWrt (cmake.mk) and Linux (CPack)
 ├── src/                    # C++23 agent (main, flow, lifecycle, reconcile,
 │                           #  bpf, exporter_ipfix/syslog, metrics, config_*)
-├── src/obserwrt-bpf.c      # the eBPF program (shared, unchanged)
+├── bpf/                    # eBPF program + shared §5 flow layout
+│   ├── obserwrt-bpf.c      # TC ingress/egress flow observation
+│   └── obserwrt-flow.h     # flow_key/flow_val PODs (single source)
 ├── vendor/                 # 3rd-party headers (nlohmann/json, inifile-cpp)
 ├── linux/                  # systemd unit + .conf for the plain-Linux .deb
 ├── obserwrt/

@@ -49,10 +49,11 @@ class Bpf
 	void detach(uint32_t ifindex);
 	bool attached(uint32_t ifindex) const;
 
-	/* Flow-map element access (raw 46B key / 40B value). */
-	bool snapshot_keys(std::vector<std::string> &out) const;
-	bool lookup(const std::string &key, std::string &value) const;
-	bool erase(const std::string &key) const;
+	/* Flow-map element access (native §5 structs - the map layout IS the key/
+	 * value POD from bpf/obserwrt-flow.h). */
+	bool snapshot_keys(std::vector<FlowKey> &out) const;
+	bool lookup(const FlowKey &key, FlowValue &value) const;
+	bool erase(const FlowKey &key) const;
 	void purge_ifindex(uint32_t ifindex);
 
 	/* Self-observability. */
@@ -90,13 +91,13 @@ class BpfFlowMap : public FlowMap
 	}
 
 	void reset() override;
-	bool next_key(std::string &key) override;
-	bool get(const std::string &key, std::string &value) override;
-	bool delete_key(const std::string &key) override;
+	bool next_key(FlowKey &key) override;
+	bool get(const FlowKey &key, FlowValue &value) override;
+	bool delete_key(const FlowKey &key) override;
 
       private:
 	const Bpf *b_;
-	std::vector<std::string> snapshot_;
+	std::vector<FlowKey> snapshot_;
 	size_t pos_ = 0;
 };
 

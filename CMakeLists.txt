@@ -11,7 +11,7 @@ cmake_minimum_required(VERSION 3.20)
 # Version tracks PKG_VERSION; the maintainer bumps to 1.0.0 deliberately
 # (SemVer stability declaration); this file never auto-bumps.
 project(obserwrt
-  VERSION 0.2.6
+  VERSION 0.3.0
   LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
@@ -88,7 +88,7 @@ add_library(obserwrt_core OBJECT
   src/reconcile.cpp
   src/udp_client.cpp)
 
-target_include_directories(obserwrt_core PUBLIC src)
+target_include_directories(obserwrt_core PUBLIC src bpf)
 # Vendored third-party code (inifile-cpp, nlohmann/json) on the SYSTEM
 # include path: compilers and clang-tidy treat it as third-party code.
 target_include_directories(obserwrt_core SYSTEM PRIVATE
@@ -155,9 +155,10 @@ if(NOT OBSEWRRT_USE_LIBUCI)
         COMMAND ${CMAKE_COMMAND} -E create_symlink /usr/include/linux
           ${BPF_SHIM}/uapi/linux
         COMMAND ${BPF_CLANG} -O2 -g ${BPF_INCS}
-          -c ${CMAKE_CURRENT_SOURCE_DIR}/obserwrt/src/obserwrt-bpf.c
+          -c ${CMAKE_CURRENT_SOURCE_DIR}/bpf/obserwrt-bpf.c
           -o ${BPF_OBJECT}
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/obserwrt/src/obserwrt-bpf.c
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/bpf/obserwrt-bpf.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/bpf/obserwrt-flow.h
         COMMENT "Building obserwrt-bpf.o")
       add_custom_target(obserwrt_bpf_o ALL DEPENDS ${BPF_OBJECT})
       install(FILES ${BPF_OBJECT} DESTINATION lib/obserwrt)

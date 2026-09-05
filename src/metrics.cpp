@@ -42,6 +42,12 @@ void Metrics::record_error()
 		total_errors_++;
 }
 
+void Metrics::record_errors(unsigned long n)
+{
+	if (active_)
+		total_errors_ += n;
+}
+
 void Metrics::set_state(unsigned flows_active, unsigned map_entries,
 			const std::vector<std::string> &devices)
 {
