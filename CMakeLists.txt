@@ -11,7 +11,7 @@ cmake_minimum_required(VERSION 3.20)
 # Version tracks PKG_VERSION; the maintainer bumps to 1.0.0 deliberately
 # (SemVer stability declaration); this file never auto-bumps.
 project(obserwrt
-  VERSION 0.3.1
+  VERSION 0.3.2
   LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
