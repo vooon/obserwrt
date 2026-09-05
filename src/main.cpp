@@ -37,27 +37,12 @@
 #include "reconcile.hpp"
 #include "udp_client.hpp"
 
+#include "log.hpp"
+
 namespace
 {
 
 constexpr int LIFECYCLE_S = 5;
-
-/* Daemon diagnostic verbosity (initialized from main.log_level). Gating is
- * done here, NOT via setlogmask(), because setlogmask would also silence the
- * syslog exporter's local-mode LOG_INFO flow records. */
-int g_log_level = LOG_NOTICE;
-
-/* Daemon diagnostic logging, gated on main.log_level. Macros (not a
- * function) so syslog gets the real varargs directly - no va_list to trip the
- * clang-analyzer valist check. ::syslog bypasses the local `syslog` variable
- * (the SyslogExporter) in main(). Not setlogmask(): that would also drop the
- * syslog exporter's local-mode LOG_INFO flow records. */
-#define DAEMON_LOG(prio, ...)                                                                      \
-	do {                                                                                       \
-		if ((prio) > g_log_level)                                                          \
-			break;                                                                     \
-		::syslog((prio), __VA_ARGS__);                                                     \
-	} while (0)
 
 uint64_t mono_ms()
 {
@@ -130,7 +115,7 @@ int main(int argc, char **argv)
 		DAEMON_LOG(LOG_ERR, "fatal: %s", err.c_str());
 		return 1;
 	}
-	g_log_level = cfg.log_level;
+	obserwrt::g_log_level = cfg.log_level;
 
 	obserwrt::Metrics metrics;
 	metrics.init(cfg);

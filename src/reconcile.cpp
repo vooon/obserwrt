@@ -19,6 +19,8 @@
 #include <cerrno>
 #include <cstring>
 
+#include "log.hpp"
+
 namespace obserwrt
 {
 
@@ -65,7 +67,11 @@ bool Reconcile::open(std::string *err)
 	}
 
 	int grp = RTMGRP_LINK;
-	setsockopt(fd_, SOL_NETLINK, NETLINK_ADD_MEMBERSHIP, &grp, sizeof(grp));
+	const int mrc = setsockopt(fd_, SOL_NETLINK, NETLINK_ADD_MEMBERSHIP, &grp, sizeof(grp));
+	DAEMON_LOG(LOG_DEBUG, "netlink fd=%d group=RTMGRP_LINK rc=%d errno=%d", fd_, mrc,
+		   mrc < 0 ? errno : 0);
+	if (mrc < 0)
+		DAEMON_LOG(LOG_WARNING, "netlink: cannot join RTMGRP_LINK (%s)", strerror(errno));
 
 	struct sockaddr_nl sa;
 	std::memset(&sa, 0, sizeof(sa));
@@ -140,6 +146,9 @@ void Reconcile::dispatch(const void *data, size_t len, const Callback &cb)
 		if (h->nlmsg_type == RTM_NEWLINK || h->nlmsg_type == RTM_DELLINK) {
 			LinkEvent ev;
 			parse_link(h, ev);
+			DAEMON_LOG(LOG_DEBUG, "link event %s ifindex=%u up=%d present=%d",
+				   ev.ifname.c_str(), ev.ifindex, ev.up ? 1 : 0,
+				   ev.present ? 1 : 0);
 			if (!ev.ifname.empty())
 				cb(ev);
 		}
