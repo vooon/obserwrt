@@ -111,6 +111,10 @@ std::string sys_hostname()
 		return "";
 	char buf[129];
 	size_t n = std::fread(buf, 1, sizeof(buf) - 1, f);
+	/* fread officially returns a short count rather than -1 on error, but be
+	 * defensive: a (size_t)-1/erroneous read would make buf[n-1] OOB. */
+	if (n == static_cast<size_t>(-1) || std::ferror(f))
+		n = 0;
 	std::fclose(f);
 	while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r'))
 		n--;
