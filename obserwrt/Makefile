@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=obserwrt
 PKG_VERSION:=0.2.6
-PKG_RELEASE:=100
+PKG_RELEASE:=101
 
 PKG_BUILD_DIR:=$(BUILD_DIR)/obserwrt-$(PKG_VERSION)
 PKG_BUILD_DEPENDS:=bpf-headers
