@@ -24,7 +24,39 @@ namespace
 
 constexpr uint16_t VERSION = 10;
 
-/* Template field lists: [ieId, length] - identical to exporter_ipfix.uc. */
+/* ---------------------------------------------------------------------------
+ * Template fields - IANA IPFIX IEs (RFC 7011), enterprise 0.
+ *
+ * Both templates carry the same 12-element record; only the address IEs
+ * differ: the v4 template (below) keys on the IPv4-mapped ::ffff: prefix and
+ * emits the last 4 bytes of src/dst; the v6 template uses the 16-byte
+ * sourceIPv6Address / destinationIPv6Address IEs 27/28 instead of 8/12.
+ *
+ * | IE  | Field                    | Len | Meaning                                |
+ * |-----|--------------------------|-----|----------------------------------------|
+ * | 8   | sourceIPv4Address        | 4   | source addr (v4: last 4 B of ::ffff:)  |
+ * | 12  | destinationIPv4Address   | 4   | dest addr (v4: last 4 B of ::ffff:)    |
+ * | 27  | sourceIPv6Address        | 16  | source addr (v6 template)              |
+ * | 28  | destinationIPv6Address   | 16  | dest addr (v6 template)                |
+ * | 7   | sourceTransportPort      | 2   | TCP/UDP sport; 0 for ICMP/other        |
+ * | 11  | destinationTransportPort | 2   | TCP/UDP dport; 0 for ICMP/other        |
+ * | 4   | protocolIdentifier       | 1   | IP protocol number (FlowKey.protocol)  |
+ * | 2   | packetDeltaCount         | 8   | packets since last export (delta)      |
+ * | 1   | octetDeltaCount          | 8   | bytes since last export (delta)        |
+ * | 152 | flowStartMilliseconds    | 8   | first packet of flow, UNIX ms          |
+ * | 153 | flowEndMilliseconds      | 8   | last packet seen, UNIX ms              |
+ * | 6   | tcpControlBits           | 2   | TCP flags, low 8 (OR'd across packets) |
+ * | 10  | ingressInterface         | 4   | ifindex on ingress, else 0             |
+ * | 14  | egressInterface          | 4   | ifindex on egress, else 0              |
+ *
+ * fieldStart/End ms = startup offset + flow first_seen/last_seen (monotonic
+ * ns), so wall-clock corrections are reflected by offset refresh (set_epoch /
+ * set_offset_ms). Lengths are fixed, so a record is the fields below encoded
+ * in the same order (see emit()).
+ * ---------------------------------------------------------------------------
+ */
+
+//! Template for IPv4
 const std::vector<std::pair<uint16_t, uint16_t>> FIELDS_V4 = {
     {8, 4},   /* sourceIPv4Address */
     {12, 4},  /* destinationIPv4Address */
@@ -40,10 +72,20 @@ const std::vector<std::pair<uint16_t, uint16_t>> FIELDS_V4 = {
     {14, 4},  /* egressInterface */
 };
 
+//! Template for IPv6
 const std::vector<std::pair<uint16_t, uint16_t>> FIELDS_V6 = {
     {27, 16}, /* sourceIPv6Address */
     {28, 16}, /* destinationIPv6Address */
-    {7, 2},   {11, 2}, {4, 1}, {2, 8}, {1, 8}, {152, 8}, {153, 8}, {6, 2}, {10, 4}, {14, 4},
+    {7, 2},   /* sourceTransportPort */
+    {11, 2},  /* destinationTransportPort */
+    {4, 1},   /* protocolIdentifier */
+    {2, 8},   /* packetDeltaCount */
+    {1, 8},   /* octetDeltaCount */
+    {152, 8}, /* flowStartMilliseconds */
+    {153, 8}, /* flowEndMilliseconds */
+    {6, 2},   /* tcpControlBits */
+    {10, 4},  /* ingressInterface */
+    {14, 4},  /* egressInterface */
 };
 
 inline void append_raw(std::vector<std::byte> &b, const void *p, size_t n)
