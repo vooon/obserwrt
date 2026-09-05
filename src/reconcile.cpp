@@ -20,6 +20,7 @@
 #include <cstring>
 
 #include "log.hpp"
+#include "logfmt.hpp"
 
 namespace obserwrt
 {
@@ -67,7 +68,7 @@ bool Reconcile::open(std::string *err)
 	}
 
 	int grp = RTMGRP_LINK;
-	DAEMON_LOG(LOG_DEBUG, "netlink fd=%d subscribing RTMGRP_LINK", fd_);
+	SLOG(LOG_DEBUG, "subscribing to link events")("fd", fd_);
 
 	struct sockaddr_nl sa;
 	std::memset(&sa, 0, sizeof(sa));
@@ -148,9 +149,8 @@ void Reconcile::dispatch(const void *data, size_t len, const Callback &cb)
 		if (h->nlmsg_type == RTM_NEWLINK || h->nlmsg_type == RTM_DELLINK) {
 			LinkEvent ev;
 			parse_link(h, ev);
-			DAEMON_LOG(LOG_DEBUG, "link event %s ifindex=%u up=%d present=%d",
-				   ev.ifname.c_str(), ev.ifindex, ev.up ? 1 : 0,
-				   ev.present ? 1 : 0);
+			SLOG(LOG_DEBUG, "link event")("ifname", ev.ifname)("ifindex", ev.ifindex)(
+			    "up", ev.up)("present", ev.present);
 			if (!ev.ifname.empty())
 				cb(ev);
 		}

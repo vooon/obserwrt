@@ -38,6 +38,7 @@
 #include "udp_client.hpp"
 
 #include "log.hpp"
+#include "logfmt.hpp"
 
 namespace
 {
@@ -112,7 +113,7 @@ int main(int argc, char **argv)
 	std::string err;
 	const obserwrt::Config cfg = obserwrt::load_config(config_path, &err);
 	if (!err.empty()) {
-		DAEMON_LOG(LOG_ERR, "fatal: %s", err.c_str());
+		SLOG(LOG_ERR, "config load failed")("error", err);
 		return 1;
 	}
 	obserwrt::g_log_level = cfg.log_level;
@@ -126,12 +127,12 @@ int main(int argc, char **argv)
 	std::string syslog_err;
 	const bool syslog_active = syslog.init(cfg.syslog, &syslog_err);
 	if (!syslog_err.empty())
-		DAEMON_LOG(LOG_WARNING, "syslog: %s", syslog_err.c_str());
+		SLOG(LOG_WARNING, "syslog init failed")("error", syslog_err);
 
 	if (cfg.ipfix.enabled) {
 		if (!ipfix.connect(cfg.ipfix.collector_host, cfg.ipfix.collector_port,
 				   cfg.ipfix.source_address, &err)) {
-			DAEMON_LOG(LOG_ERR, "fatal: %s", err.c_str());
+			SLOG(LOG_ERR, "ipfix connect failed")("error", err);
 			return 1;
 		}
 	}
@@ -144,7 +145,7 @@ int main(int argc, char **argv)
 
 	obserwrt::Bpf bpf;
 	if (!bpf.load(bpf_object, cfg.max_flows, &err)) {
-		DAEMON_LOG(LOG_ERR, "fatal: bpf: %s", err.c_str());
+		SLOG(LOG_ERR, "bpf load failed")("error", err);
 		return 1;
 	}
 	metrics.set_map_limit(bpf.map_limit());
@@ -154,7 +155,7 @@ int main(int argc, char **argv)
 
 	obserwrt::Reconcile rec;
 	if (!rec.open(&err)) {
-		DAEMON_LOG(LOG_ERR, "fatal: %s", err.c_str());
+		SLOG(LOG_ERR, "reconcile open failed")("error", err);
 		return 1;
 	}
 
@@ -184,24 +185,24 @@ int main(int argc, char **argv)
 
 		if (attached) {
 			if (!wanted) {
-				DAEMON_LOG(LOG_NOTICE, "detached %s (ifindex %u)",
-					   ev.ifname.c_str(), ev.ifindex);
+				SLOG(LOG_NOTICE,
+				     "device detached")("ifname", ev.ifname)("ifindex", ev.ifindex);
 				bpf.detach(ev.ifindex);
 				bpf.purge_ifindex(ev.ifindex);
 				name_by_index.erase(ev.ifindex);
 			} else if (name_by_index[ev.ifindex] != ev.ifname) {
 				name_by_index[ev.ifindex] = ev.ifname;
-				DAEMON_LOG(LOG_NOTICE, "renamed %s (ifindex %u)", ev.ifname.c_str(),
-					   ev.ifindex);
+				SLOG(LOG_NOTICE, "device renamed")("ifname", ev.ifname)("ifindex",
+											ev.ifindex);
 			}
 		} else if (wanted) {
 			if (bpf.attach(ev.ifindex, &err)) {
 				name_by_index[ev.ifindex] = ev.ifname;
-				DAEMON_LOG(LOG_NOTICE, "attached %s (ifindex %u)",
-					   ev.ifname.c_str(), ev.ifindex);
+				SLOG(LOG_NOTICE,
+				     "device attached")("ifname", ev.ifname)("ifindex", ev.ifindex);
 			} else
-				DAEMON_LOG(LOG_WARNING, "attach %s: %s", ev.ifname.c_str(),
-					   err.c_str());
+				SLOG(LOG_WARNING, "device attach failed")("ifname",
+									  ev.ifname)("error", err);
 		}
 		refresh_names();
 	};
@@ -210,25 +211,24 @@ int main(int argc, char **argv)
 		/* Reconciliation has no periodic rescan: a failed initial dump leaves
 		 * already-up devices unattached until an unrelated link event, so
 		 * fail hard and let procd/systemd restart into a clean reconcile. */
-		DAEMON_LOG(LOG_ERR, "fatal: reconcile dump: %s", err.c_str());
+		SLOG(LOG_ERR, "reconcile dump failed")("error", err);
 		return 1;
 	}
 
 	if (!cfg.ipfix.enabled && !syslog_active)
-		DAEMON_LOG(LOG_WARNING, "no exporters enabled; observations will not be exported");
+		SLOG(LOG_WARNING, "no exporters enabled");
 
-	DAEMON_LOG(LOG_INFO,
-		   "started (config %s, bpf %s, devices %zu, ipfix %s, syslog %s, metrics %s)",
-		   config_path.c_str(), bpf_object.c_str(), cfg.devices.size(),
-		   cfg.ipfix.enabled ? "on" : "off", syslog_active ? "on" : "off",
-		   metrics.active() ? cfg.prometheus_textfile.c_str() : "off");
+	SLOG(LOG_INFO, "started")("config", config_path)("bpf", bpf_object)("devices",
+									    cfg.devices.size())(
+	    "ipfix", cfg.ipfix.enabled ? "on" : "off")("syslog", syslog_active ? "on" : "off")(
+	    "metrics", metrics.active() ? cfg.prometheus_textfile.c_str() : "off");
 
 	const uint32_t metric_s = cfg.prometheus_interval > 0 ? cfg.prometheus_interval : 20;
 	int ep = epoll_create1(EPOLL_CLOEXEC);
 	int t_life = make_timer(LIFECYCLE_S, &err);
 	int t_meter = make_timer(metric_s, &err);
 	if (ep < 0 || t_life < 0 || t_meter < 0) {
-		DAEMON_LOG(LOG_ERR, "fatal: %s", err.c_str());
+		SLOG(LOG_ERR, "timer creation failed")("error", err);
 		return 1;
 	}
 
@@ -249,7 +249,7 @@ int main(int argc, char **argv)
 		if (n < 0) {
 			if (errno == EINTR)
 				continue;
-			DAEMON_LOG(LOG_ERR, "epoll: %s", std::strerror(errno));
+			SLOG(LOG_ERR, "epoll wait failed")("error", std::strerror(errno));
 			return 1;
 		}
 
@@ -271,8 +271,8 @@ int main(int argc, char **argv)
 						/* ENOBUFS and friends lose link notifications; a
 						 * missed down/up/rename leaves TC + names stale, so
 						 * resync from a fresh dump. */
-						DAEMON_LOG(LOG_WARNING, "netlink recv: %s",
-							   std::strerror(errno));
+						SLOG(LOG_WARNING, "netlink receive failed")(
+						    "error", std::strerror(errno));
 						resync = true;
 						break;
 					}
@@ -309,8 +309,8 @@ int main(int argc, char **argv)
 				 * owned sockets) into obserwrt_export_errors_total. */
 				metrics.record_errors(ipfix.take_failures() +
 						      syslog.take_failures());
-				DAEMON_LOG(LOG_DEBUG, "pass active=%u expired=%u map=%u", st.active,
-					   st.expired, st.map);
+				SLOG(LOG_DEBUG, "lifecycle pass")("active", st.active)(
+				    "expired", st.expired)("map", st.map);
 				metrics.set_state(st.active, st.map, attached_names);
 				metrics.set_bpf(stat[0], stat[1], stat[3], stat[2]);
 			} else if (f == t_meter) {

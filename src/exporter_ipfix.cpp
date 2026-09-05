@@ -177,42 +177,49 @@ void IpfixExporter::send_templates(uint32_t export_time_s)
 	last_template_sent_s_ = export_time_s;
 }
 
-void IpfixExporter::emit_set(uint32_t export_time_s, uint16_t set_id,
-			     const std::vector<std::byte> &body, size_t cnt)
-{
-	std::vector<std::byte> m;
-	m.reserve(16 + 4 + body.size());
-	append_be(m, VERSION);
-	append_be(m, static_cast<uint16_t>(16 + 4 + body.size()));
-	append_be(m, export_time_s);
-	append_be(m, seq_);
-	append_be(m, obs_domain_);
-	append_be(m, set_id);
-	append_be(m, static_cast<uint16_t>(4 + body.size()));
-	m.insert(m.end(), body.begin(), body.end());
-
-	send(std::move(m));
-	seq_ += static_cast<uint32_t>(cnt);
-}
-
 void IpfixExporter::flush_set(uint32_t export_time_s, uint16_t set_id,
 			      std::vector<std::vector<std::byte>> &records)
 {
-	std::vector<std::byte> body;
-	size_t cnt = 0;
+	constexpr size_t MSG_HDR = 16; /* version,length,exportTime,seq,domain */
+	constexpr size_t SET_HDR = 4;  /* set id + set length */
 
-	for (const auto &r : records) {
-		if (cnt > 0 && 16 + 4 + body.size() + r.size() > MAX_UDP) {
-			emit_set(export_time_s, set_id, body, cnt);
-			body.clear();
+	/* One pre-sized datagram per chunk: header + records, so a record is
+	 * copied exactly once (into the datagram) and the buffer never grows
+	 * after reserve(). send() takes the moved buffer with no extra copy. */
+	auto emit = [&](size_t from, size_t to, size_t cnt, size_t body) {
+		std::vector<std::byte> m;
+		m.reserve(MSG_HDR + SET_HDR + body);
+		append_be(m, VERSION);
+		append_be(m, static_cast<uint16_t>(MSG_HDR + SET_HDR + body));
+		append_be(m, export_time_s);
+		append_be(m, seq_);
+		append_be(m, obs_domain_);
+		append_be(m, set_id);
+		append_be(m, static_cast<uint16_t>(SET_HDR + body));
+		for (size_t i = from; i < to; i++)
+			m.insert(m.end(), records[i].begin(), records[i].end());
+		send(std::move(m));
+		seq_ += static_cast<uint32_t>(cnt);
+	};
+
+	size_t start = 0;
+	size_t cnt = 0;
+	size_t body = 0;
+
+	for (size_t i = 0; i < records.size(); i++) {
+		const size_t rsz = records[i].size();
+		if (cnt > 0 && MSG_HDR + SET_HDR + body + rsz > MAX_UDP) {
+			emit(start, i, cnt, body);
+			start = i;
 			cnt = 0;
+			body = 0;
 		}
-		body.insert(body.end(), r.begin(), r.end());
+		body += rsz;
 		cnt++;
 	}
 
 	if (cnt > 0)
-		emit_set(export_time_s, set_id, body, cnt);
+		emit(start, records.size(), cnt, body);
 }
 
 void IpfixExporter::emit(const FlowKey &k, const FlowValue &v, const Delta *delta)
@@ -226,7 +233,11 @@ void IpfixExporter::emit(const FlowKey &k, const FlowValue &v, const Delta *delt
 	const uint32_t ingress = (k.direction == INGRESS) ? k.ifindex : 0;
 	const uint32_t egress = (k.direction == EGRESS) ? k.ifindex : 0;
 
+	/* Fixed record size per family (55 B v4 / 79 B v6) - reserve exactly so
+	 * building appends never reallocate (the datagram itself is assembled in
+	 * one pre-sized buffer in flush_set()). */
 	std::vector<std::byte> rec;
+	rec.reserve(k.family == 4 ? 55 : 79);
 
 	if (k.family == 4) {
 		append_raw(rec, k.src + 12, 4);

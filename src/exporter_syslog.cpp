@@ -9,6 +9,7 @@
 #include "exporter_syslog.hpp"
 
 #include "log.hpp"
+#include "logfmt.hpp"
 
 /* nlohmann/json (vendored, MIT). Compiled exceptions-free (JSON_NOEXCEPTION);
  * only serialization is used here, so error paths compile out. */
@@ -272,7 +273,7 @@ void SyslogExporter::emit(const FlowKey &k, const FlowValue &v, bool expired, co
 	const auto span =
 	    std::span(reinterpret_cast<const std::byte *>(framed.data()), framed.size());
 	if (!remote_.send(span))
-		DAEMON_LOG(LOG_WARNING, "syslog: send failed (%s)", std::strerror(errno));
+		SLOG(LOG_WARNING, "syslog send failed")("error", std::strerror(errno));
 }
 
 } /* namespace obserwrt */

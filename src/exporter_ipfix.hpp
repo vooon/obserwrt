@@ -93,8 +93,6 @@ class IpfixExporter
 	std::vector<std::vector<std::byte>> pending6_;
 
 	void send(std::vector<std::byte> data);
-	void emit_set(uint32_t export_time_s, uint16_t set_id, const std::vector<std::byte> &body,
-		      size_t cnt);
 	void flush_set(uint32_t export_time_s, uint16_t set_id,
 		       std::vector<std::vector<std::byte>> &records);
 	std::vector<std::byte>
