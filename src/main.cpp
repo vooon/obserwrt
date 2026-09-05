@@ -20,6 +20,7 @@
 #include <sys/socket.h>
 
 #include <cerrno>
+#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -40,6 +41,23 @@ namespace
 {
 
 constexpr int LIFECYCLE_S = 5;
+
+/* Daemon diagnostic verbosity (initialized from main.log_level). Gating is
+ * done here, NOT via setlogmask(), because setlogmask would also silence the
+ * syslog exporter's local-mode LOG_INFO flow records. */
+int g_log_level = LOG_NOTICE;
+
+void daemon_log(int prio, const char *fmt, ...)
+{
+	if (prio > g_log_level)
+		return;
+	char buf[1024];
+	va_list ap;
+	va_start(ap, fmt);
+	std::vsnprintf(buf, sizeof(buf), fmt, ap);
+	va_end(ap);
+	::syslog(prio, "%s", buf);
+}
 
 uint64_t mono_ms()
 {
@@ -177,9 +195,10 @@ int main(int argc, char **argv)
 	std::string err;
 	const obserwrt::Config cfg = obserwrt::load_config(config_path, &err);
 	if (!err.empty()) {
-		::syslog(LOG_ERR, "fatal: %s", err.c_str());
+		daemon_log(LOG_ERR, "fatal: %s", err.c_str());
 		return 1;
 	}
+	g_log_level = cfg.log_level;
 
 	obserwrt::Metrics metrics;
 	metrics.init(cfg);
@@ -190,13 +209,13 @@ int main(int argc, char **argv)
 	std::string syslog_err;
 	const bool syslog_active = syslog.init(cfg.syslog, &syslog_err);
 	if (!syslog_err.empty())
-		::syslog(LOG_WARNING, "syslog: %s", syslog_err.c_str());
+		daemon_log(LOG_WARNING, "syslog: %s", syslog_err.c_str());
 
 	UdpOut ipfix_sock;
 	if (cfg.ipfix.enabled) {
 		if (!ipfix_sock.open(cfg.ipfix.collector_host, cfg.ipfix.collector_port,
 				     cfg.ipfix.source_address, &err)) {
-			::syslog(LOG_ERR, "fatal: %s", err.c_str());
+			daemon_log(LOG_ERR, "fatal: %s", err.c_str());
 			return 1;
 		}
 		ipfix.set_sink([&](const std::string &data) { ipfix_sock.send(data); });
@@ -210,7 +229,7 @@ int main(int argc, char **argv)
 
 	obserwrt::Bpf bpf;
 	if (!bpf.load(bpf_object, cfg.max_flows, &err)) {
-		::syslog(LOG_ERR, "fatal: bpf: %s", err.c_str());
+		daemon_log(LOG_ERR, "fatal: bpf: %s", err.c_str());
 		return 1;
 	}
 	metrics.set_map_limit(bpf.map_limit());
@@ -220,7 +239,7 @@ int main(int argc, char **argv)
 
 	obserwrt::Reconcile rec;
 	if (!rec.open(&err)) {
-		::syslog(LOG_ERR, "fatal: %s", err.c_str());
+		daemon_log(LOG_ERR, "fatal: %s", err.c_str());
 		return 1;
 	}
 
@@ -250,14 +269,14 @@ int main(int argc, char **argv)
 				return;
 			if (bpf.attach(ev.ifindex, &err)) {
 				name_by_index[ev.ifindex] = ev.ifname;
-				::syslog(LOG_NOTICE, "attached %s (ifindex %u)", ev.ifname.c_str(),
-					 ev.ifindex);
+				daemon_log(LOG_NOTICE, "attached %s (ifindex %u)",
+					   ev.ifname.c_str(), ev.ifindex);
 			} else
-				::syslog(LOG_WARNING, "attach %s: %s", ev.ifname.c_str(),
-					 err.c_str());
+				daemon_log(LOG_WARNING, "attach %s: %s", ev.ifname.c_str(),
+					   err.c_str());
 		} else if (bpf.attached(ev.ifindex)) {
-			::syslog(LOG_NOTICE, "detached %s (ifindex %u)", ev.ifname.c_str(),
-				 ev.ifindex);
+			daemon_log(LOG_NOTICE, "detached %s (ifindex %u)", ev.ifname.c_str(),
+				   ev.ifindex);
 			bpf.detach(ev.ifindex);
 			bpf.purge_ifindex(ev.ifindex);
 			name_by_index.erase(ev.ifindex);
@@ -266,23 +285,23 @@ int main(int argc, char **argv)
 	};
 
 	if (!rec.dump(on_link, &err))
-		::syslog(LOG_WARNING, "reconcile dump: %s", err.c_str());
+		daemon_log(LOG_WARNING, "reconcile dump: %s", err.c_str());
 
 	if (!cfg.ipfix.enabled && !syslog_active)
-		::syslog(LOG_WARNING, "no exporters enabled; observations will not be exported");
+		daemon_log(LOG_WARNING, "no exporters enabled; observations will not be exported");
 
-	::syslog(LOG_INFO,
-		 "started (config %s, bpf %s, devices %zu, ipfix %s, syslog %s, metrics %s)",
-		 config_path.c_str(), bpf_object.c_str(), cfg.devices.size(),
-		 cfg.ipfix.enabled ? "on" : "off", syslog_active ? "on" : "off",
-		 metrics.active() ? cfg.prometheus_textfile.c_str() : "off");
+	daemon_log(LOG_INFO,
+		   "started (config %s, bpf %s, devices %zu, ipfix %s, syslog %s, metrics %s)",
+		   config_path.c_str(), bpf_object.c_str(), cfg.devices.size(),
+		   cfg.ipfix.enabled ? "on" : "off", syslog_active ? "on" : "off",
+		   metrics.active() ? cfg.prometheus_textfile.c_str() : "off");
 
 	const uint32_t metric_s = cfg.prometheus_interval > 0 ? cfg.prometheus_interval : 20;
 	int ep = epoll_create1(EPOLL_CLOEXEC);
 	int t_life = make_timer(LIFECYCLE_S, &err);
 	int t_meter = make_timer(metric_s, &err);
 	if (ep < 0 || t_life < 0 || t_meter < 0) {
-		::syslog(LOG_ERR, "fatal: %s", err.c_str());
+		daemon_log(LOG_ERR, "fatal: %s", err.c_str());
 		return 1;
 	}
 
@@ -303,7 +322,7 @@ int main(int argc, char **argv)
 		if (n < 0) {
 			if (errno == EINTR)
 				continue;
-			::syslog(LOG_ERR, "epoll: %s", std::strerror(errno));
+			daemon_log(LOG_ERR, "epoll: %s", std::strerror(errno));
 			return 1;
 		}
 
@@ -338,6 +357,8 @@ int main(int argc, char **argv)
 				    });
 				if (cfg.ipfix.enabled)
 					ipfix.flush(now_s);
+				daemon_log(LOG_DEBUG, "pass active=%u expired=%u map=%u", st.active,
+					   st.expired, st.map);
 				metrics.set_state(st.active, st.map, attached_names);
 				metrics.set_bpf(stat[0], stat[1], stat[3], stat[2]);
 			} else if (f == t_meter) {

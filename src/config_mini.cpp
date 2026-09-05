@@ -97,6 +97,7 @@ Config parse(ini::IniFile &ini)
 	    parse_uint(ini, "main", "general_timeout", 10, 86400, "general_timeout");
 	cfg.max_flows =
 	    static_cast<uint32_t>(parse_uint(ini, "main", "max_flows", 0, 1ULL << 30, "max_flows"));
+	cfg.log_level = log_level_from_string(field(ini, "main", "log_level"), LOG_NOTICE);
 	cfg.prometheus_textfile = std::string(field(ini, "main", "prometheus_textfile"));
 	cfg.prometheus_interval = static_cast<uint32_t>(
 	    parse_uint(ini, "main", "prometheus_interval", 20, 86400, "prometheus_interval"));

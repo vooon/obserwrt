@@ -9,8 +9,11 @@
 
 #pragma once
 
+#include <syslog.h>
+
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "lifecycle.hpp"
@@ -18,9 +21,29 @@
 namespace obserwrt
 {
 
+/* Map a config log_level string to a syslog priority; unknown -> def. */
+inline int log_level_from_string(std::string_view s, int def)
+{
+	if (s == "debug")
+		return LOG_DEBUG;
+	if (s == "info")
+		return LOG_INFO;
+	if (s == "notice")
+		return LOG_NOTICE;
+	if (s == "warning" || s == "warn")
+		return LOG_WARNING;
+	if (s == "error" || s == "err")
+		return LOG_ERR;
+	return def;
+}
+
 struct Config {
 	std::vector<std::string> devices;
 	Timeouts timeouts;
+
+	/* Daemon diagnostic verbosity (syslog priority; debug shows the per-pass
+	 * lifecycle line). */
+	int log_level = LOG_NOTICE;
 
 	/* Flow-map LRU capacity; 0 = baked-in default of the loaded BPF object. */
 	uint32_t max_flows = 0;
