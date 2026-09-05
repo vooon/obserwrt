@@ -149,8 +149,9 @@ void Reconcile::dispatch(const void *data, size_t len, const Callback &cb)
 		if (h->nlmsg_type == RTM_NEWLINK || h->nlmsg_type == RTM_DELLINK) {
 			LinkEvent ev;
 			parse_link(h, ev);
-			SLOG(LOG_DEBUG, "link event")("ifname", ev.ifname)("ifindex", ev.ifindex)(
-			    "up", ev.up)("present", ev.present);
+			SLOG(LOG_DEBUG, "link event")
+			("ifname", ev.ifname)("ifindex", ev.ifindex)("up", ev.up)("present",
+										  ev.present);
 			if (!ev.ifname.empty())
 				cb(ev);
 		}

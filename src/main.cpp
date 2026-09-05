@@ -185,24 +185,24 @@ int main(int argc, char **argv)
 
 		if (attached) {
 			if (!wanted) {
-				SLOG(LOG_NOTICE,
-				     "device detached")("ifname", ev.ifname)("ifindex", ev.ifindex);
+				SLOG(LOG_NOTICE, "device detached")
+				("ifname", ev.ifname)("ifindex", ev.ifindex);
 				bpf.detach(ev.ifindex);
 				bpf.purge_ifindex(ev.ifindex);
 				name_by_index.erase(ev.ifindex);
 			} else if (name_by_index[ev.ifindex] != ev.ifname) {
 				name_by_index[ev.ifindex] = ev.ifname;
-				SLOG(LOG_NOTICE, "device renamed")("ifname", ev.ifname)("ifindex",
-											ev.ifindex);
+				SLOG(LOG_NOTICE, "device renamed")
+				("ifname", ev.ifname)("ifindex", ev.ifindex);
 			}
 		} else if (wanted) {
 			if (bpf.attach(ev.ifindex, &err)) {
 				name_by_index[ev.ifindex] = ev.ifname;
-				SLOG(LOG_NOTICE,
-				     "device attached")("ifname", ev.ifname)("ifindex", ev.ifindex);
+				SLOG(LOG_NOTICE, "device attached")
+				("ifname", ev.ifname)("ifindex", ev.ifindex);
 			} else
-				SLOG(LOG_WARNING, "device attach failed")("ifname",
-									  ev.ifname)("error", err);
+				SLOG(LOG_WARNING, "device attach failed")
+			("ifname", ev.ifname)("error", err);
 		}
 		refresh_names();
 	};
@@ -218,8 +218,8 @@ int main(int argc, char **argv)
 	if (!cfg.ipfix.enabled && !syslog_active)
 		SLOG(LOG_WARNING, "no exporters enabled");
 
-	SLOG(LOG_INFO, "started")("config", config_path)("bpf", bpf_object)("devices",
-									    cfg.devices.size())(
+	SLOG(LOG_INFO, "started")
+	("config", config_path)("bpf", bpf_object)("devices", cfg.devices.size())(
 	    "ipfix", cfg.ipfix.enabled ? "on" : "off")("syslog", syslog_active ? "on" : "off")(
 	    "metrics", metrics.active() ? cfg.prometheus_textfile.c_str() : "off");
 
@@ -271,8 +271,8 @@ int main(int argc, char **argv)
 						/* ENOBUFS and friends lose link notifications; a
 						 * missed down/up/rename leaves TC + names stale, so
 						 * resync from a fresh dump. */
-						SLOG(LOG_WARNING, "netlink receive failed")(
-						    "error", std::strerror(errno));
+						SLOG(LOG_WARNING, "netlink receive failed")
+						("error", std::strerror(errno));
 						resync = true;
 						break;
 					}
@@ -309,8 +309,8 @@ int main(int argc, char **argv)
 				 * owned sockets) into obserwrt_export_errors_total. */
 				metrics.record_errors(ipfix.take_failures() +
 						      syslog.take_failures());
-				SLOG(LOG_DEBUG, "lifecycle pass")("active", st.active)(
-				    "expired", st.expired)("map", st.map);
+				SLOG(LOG_DEBUG, "lifecycle pass")
+				("active", st.active)("expired", st.expired)("map", st.map);
 				metrics.set_state(st.active, st.map, attached_names);
 				metrics.set_bpf(stat[0], stat[1], stat[3], stat[2]);
 			} else if (f == t_meter) {
