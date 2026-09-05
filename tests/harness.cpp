@@ -387,7 +387,7 @@ static void test_lifecycle_delta()
 	/* pass 1: first export carries the full flow counters, not expired. */
 	map.reset();
 	seen.clear();
-	life.run(map, collect);
+	life.run(map, collect, now_ns);
 	CHECK_EQ(seen.size(), (size_t)1);
 	CHECK_EQ(seen[0].delta.packets, (uint64_t)5);
 	CHECK_EQ(seen[0].delta.bytes, (uint64_t)500);
@@ -397,7 +397,7 @@ static void test_lifecycle_delta()
 	map.m[key] = tcp_val(8, 800, now_ns);
 	map.reset();
 	seen.clear();
-	life.run(map, collect);
+	life.run(map, collect, now_ns);
 	CHECK_EQ(seen.size(), (size_t)1);
 	CHECK_EQ(seen[0].delta.packets, (uint64_t)3);
 	CHECK_EQ(seen[0].delta.bytes, (uint64_t)300);
@@ -406,7 +406,7 @@ static void test_lifecycle_delta()
 	map.m[key] = tcp_val(9, 900, now_ns - 301ULL * 1000000000ULL);
 	map.reset();
 	seen.clear();
-	const obserwrt::Lifecycle::Stats st = life.run(map, collect);
+	const obserwrt::Lifecycle::Stats st = life.run(map, collect, now_ns);
 	CHECK_EQ(seen.size(), (size_t)1);
 	CHECK(seen[0].expired);
 	CHECK_EQ(st.expired, (unsigned)1);
@@ -417,7 +417,7 @@ static void test_lifecycle_delta()
 	map.m[key] = tcp_val(7, 700, now_ns + 5000ULL * 1000000000ULL);
 	map.reset();
 	seen.clear();
-	life.run(map, collect);
+	life.run(map, collect, now_ns);
 	CHECK_EQ(seen.size(), (size_t)1);
 	CHECK(!seen[0].expired);
 	CHECK(!map.m.empty());

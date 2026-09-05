@@ -52,9 +52,8 @@ uint64_t Lifecycle::proto_timeout(uint8_t proto) const
 	}
 }
 
-Lifecycle::Stats Lifecycle::run(FlowMap &map, const Exporter &exporter)
+Lifecycle::Stats Lifecycle::run(FlowMap &map, const Exporter &exporter, uint64_t now)
 {
-	const uint64_t now = now_ns();
 	Stats n;
 	std::unordered_set<std::string> seen;
 

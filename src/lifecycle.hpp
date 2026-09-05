@@ -72,8 +72,9 @@ class Lifecycle
 	}
 
 	/* One pass; see lifecycle.uc run(). Exporter borrows parsed key/value plus
-	 * the delta since the last export (or full counters on first sight). */
-	Stats run(FlowMap &map, const Exporter &exporter);
+	 * the delta since the last export (or full counters on first sight).
+	 * `now` is injectable for deterministic tests; defaults to the mono clock. */
+	Stats run(FlowMap &map, const Exporter &exporter, uint64_t now = now_ns());
 
 	/* Monotonic "now" in nanoseconds - same clock as bpf_ktime_get_ns(). */
 	static uint64_t now_ns();
