@@ -51,7 +51,6 @@ endef
 define Package/obserwrt
   SECTION:=utils
   CATEGORY:=Network
-  SUBMENU:=obserwrt
   TITLE:=eBPF network observability agent
   URL:=https://github.com/vooon/obserwrt
   DEPENDS:=+libbpf +libuci +libstdcpp \
@@ -64,7 +63,6 @@ define Package/obserwrt/description
   Lightweight eBPF network observability for OpenWrt and plain Linux.
   Observes traffic on selected Linux netdevs via TC ingress/egress, tracks
   flows, and exports them to IPFIX (Akvorado) and a syslog exporter.
-  See docs/design.md.
 endef
 
 define Package/obserwrt/conffiles
