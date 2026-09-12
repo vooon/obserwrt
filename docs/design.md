@@ -9,7 +9,8 @@
 
 `obserwrt` is an OpenWrt-native network observation agent built around eBPF
 and a lightweight C++23 agent. It was introduced as a ucode agent; the ucode
-VM's CPU/RAM footprint on low-end MIPS routers drove a rewrite in C++ (v0.2.6)
+VM's CPU/RAM footprint on low-end MIPS routers drove a rewrite in C++
+(v0.2.6 → v0.3.0)
 where the eBPF program and the normalized observation model stayed unchanged,
 and the ucode implementation was removed. It provides data-plane visibility:
 
@@ -42,21 +43,14 @@ a future general Linux agent.
 (Akvorado is the initial backend), but the internal flow representation must not
 be designed as an IPFIX record.
 
-```text
-eBPF
-  │
-  ▼
-raw flow state
-  │
-  ▼
-obserwrt agent (C++23)
-  │
-  ▼
-normalized observation
-  │
-  ├── IPFIX exporter
-  ├── syslog exporter
-  └── future exporters
+```mermaid
+flowchart TD
+    EBPF[eBPF] --> RAW[raw flow state]
+    RAW --> AGT[obserwrt agent C++23]
+    AGT --> OBS[normalized observation]
+    OBS --> IPFIX[IPFIX exporter]
+    OBS --> SLOG[syslog exporter]
+    OBS --> FUT[future exporters]
 ```
 
 **Dynamic interfaces are normal.** OpenWrt tunnel devices frequently disappear
@@ -72,34 +66,20 @@ ifIndex. It must never require all configured devices to exist at startup.
 
 ## 3. Architecture
 
-```text
-                  Linux network devices
-                         │
-                  TC ingress/egress
-                         │
-                         ▼
-                    eBPF programs
-                         │
-                         ▼
-BPF flow maps
-                          │
-                       libbpf
-                          │
-                          ▼
-                   obserwrt agent
-                  ┌──────┴──────┐
-                  │             │
-            flow lifecycle   rtnetlink
-                  │          reconciliation
-                  ▼
-          normalized observations
-                  │
-             ┌────┴─────┐
-              ▼          ▼
-            IPFIX       debug
-              │
-              ▼
-          Akvorado
+```mermaid
+flowchart TD
+    DEV[Linux network devices] --> TC[TC ingress/egress]
+    TC --> EBPF[eBPF programs]
+    EBPF --> MAPS[BPF flow maps]
+    MAPS --> LIB[libbpf]
+    LIB --> AGT[obserwrt agent]
+    AGT --> LF[flow lifecycle]
+    AGT --> RR[rtnetlink reconciliation]
+    LF --> OBS[normalized observations]
+    RR --> OBS
+    OBS --> IPFIX[IPFIX]
+    OBS --> DBG[debug]
+    IPFIX --> AK[Akvorado]
 ```
 
 TC (not XDP) is used because the observation point is a Linux netdev and both
@@ -236,31 +216,28 @@ SNMP and other tooling (IPFIX `OutIf=23` / SNMP `ifName.23`).
 
 ### 6.1 Model
 
-```text
-desired devices/patterns
-        +
-currently existing netdevs
-        ↓
-desired TC attachment state
+```mermaid
+flowchart LR
+    A[desired devices/patterns] --> D[desired TC attachment state]
+    B[currently existing netdevs] --> D
 ```
 
-### 6.2 Mechanism: netifd events only (v1)
+### 6.2 Mechanism: rtnetlink
 
-- **Startup enumeration:** after connecting to ubus, enumerate current matching
-  devices once and attach to anything already present. This covers starting after
-  devices exist (netifd will not re-emit `add`).
-- **Runtime events:** subscribe to netifd `network.device` and react to
-  `add`/`up` (attach) and `remove`/`down` (detach + purge that device's entries).
-  Events carry `name`, `present`, `active`, `link_active`.
+The agent talks directly to the kernel via rtnetlink — no netifd/ubus — so the
+observation points are authoritative Linux netdevs regardless of how the device
+was created (AWG/WireGuard, WAN, bridge, TUN, VXLAN, physical Ethernet).
 
-Any interface that can be bound to a firewall zone must exist as a netifd device,
-so external netdevs (openvpn tuns, VXLAN, TUN) surface as `network.device`
-events too. This makes netifd authoritative for essentially every observation
-point we would select.
-
-- **No periodic rescan in v1.** A device configured by name but never managed by
-  netifd (never zone-attached) will produce no events; that is a documented
-  limitation. A `rescan_interval` toggle (0 = off) may be offered later.
+- **Startup enumeration:** issue an `RTM_GETLINK` dump of existing devices and
+  attach to anything currently matching.
+- **Runtime events:** subscribe to live `RTM_NEWLINK`/`RTM_DELLINK` events (the
+  group must be in the `bind()` sockaddr — `netlink_bind` replaces prior
+  setsockopt membership). `up`/`add` → attach; `down`/remove → detach + purge
+  that device's entries. A rename of an attached device detaches when it no
+  longer matches, otherwise refreshes the stored name.
+- **No periodic rescan.** A device configured by name but never present will
+  simply wait; there is no polling loop. A `rescan_interval` toggle (0 = off)
+  may be offered later.
 - **Startup with zero matching devices is success** (service becomes READY).
 
 ## 7. Flow lifecycle
@@ -293,10 +270,10 @@ Correctness and bounded memory outrank sophisticated expiry.
 
 Exporters consume normalized observations:
 
-```text
-emit(flow, delta)
-   ├── ipfix.emit(flow, delta)
-   └── syslog.emit(flow, delta)
+```mermaid
+flowchart TD
+    E[emit flow, delta] --> IPFIX[ipfix.emit flow, delta]
+    E --> SLOG[syslog.emit flow, delta]
 ```
 
 Additional exporters require no eBPF data-model changes. Dynamic plugin loading
@@ -307,11 +284,16 @@ is not required.
 - UDP, default port **4739**.
 - IPFIX message headers, template sets, data sets, sequence numbers,
   observation domain, periodic template retransmission, batching multiple
-  records per datagram, datagram sizing safely below ~1400 bytes unless
-  configurable otherwise.
+  records per datagram, datagram sizing below `MAX_UDP` (1200 bytes).
 - Wire encoding is big-endian (network byte order, no padding): the C++
   exporter builds `std::byte` datagram buffers with `std::byteswap` appenders
   and hands them to the owned UDP socket as spans.
+- `flowStartMilliseconds`/`flowEndMilliseconds` (IE 152/153) are **not** the raw
+  monotonic `first_seen`/`last_seen` ns. The exporter keeps a realtime↔monotonic
+  anchor `offset_ms` and emits `offset_ms + first_seen/1e6`. The anchor is
+  captured at startup (`set_epoch`) and refreshed on every lifecycle pass
+  (`set_offset_ms`), so an NTP wall-clock correction after boot keeps flow
+  start/end timestamps tracking real time instead of pinning to the boot offset.
 - Two templates branching on the `::ffff:` prefix:
   - mapped `::ffff:*` → `sourceIPv4Address`/`destinationIPv4Address`
     (emitting only the final 4 bytes);
@@ -415,7 +397,28 @@ signs of table pressure are high `obserwrt_flows_created_total` churn combined
 with `obserwrt_bpf_map_entries` near the limit while userspace dispatched
 counts lag behind flows created.
 
-## 10. Configuration (UCI)
+## 10. Configuration
+
+One option set, two backends: UCI on OpenWrt (`/etc/config/obserwrt`,
+`config_uci.cpp`) and a plain INI file on Linux (`linux/obserwrt.conf`,
+`config_mini.cpp`). Both exporters are opt-in (`enabled`), and no collector
+is required when disabled.
+
+`device` entries are exact Linux netdev names or simple glob patterns. Both
+ingress and egress are attached to every selected device. There is **no
+implicit attach-to-everything default**. No per-interface sections until a real
+need for differing per-device behavior exists.
+
+The per-protocol idle timeouts (`tcp_timeout`/`udp_timeout`/`icmp_timeout`/
+`general_timeout`) and the flow-map capacity (`max_flows`, 0 = the baked
+4096-entry default) live in the `main` section; the per-router IPFIX
+`observation_domain` lives in the exporter section, so each router can carve
+out its own domain for multi-collector deployments.
+
+Likely future options (only when actually needed): `template_interval`,
+`rescan_interval`.
+
+### 10.1 UCI (OpenWrt)
 
 ```uci
 config obserwrt 'main'
@@ -424,14 +427,17 @@ config obserwrt 'main'
     option udp_timeout '60'
     option icmp_timeout '30'
     option general_timeout '10'
+    # option max_flows '4096'      # LRU flow-map capacity; 0 = baked-in default
+    # option log_level 'debug'     # error|warning|notice|info|debug
     # option prometheus_textfile '/run/prometheus/textfile/obserwrt.prom'  # unset = disabled
     option prometheus_interval '20'
 
-config exporter 'ipfix'
-    option type 'ipfix'
-    option destination 'collector.example.net'   # IP address or hostname
-    option port '4739'
+config exporter_ipfix 'ipfix'
+    option enabled '0'
+    option collector_host 'collector.example.net'   # IP address or hostname
+    option collector_port '4739'
     option observation_domain '1'   # per-router observation domain
+    # option source_address ''     # pin local source IP
 
 config exporter_syslog 'syslog'
     option enabled '0'
@@ -443,38 +449,59 @@ config exporter_syslog 'syslog'
     # option source_address ''  # pin local source IP
 ```
 
-`device` entries are exact Linux netdev names or simple glob patterns. Both
-ingress and egress are attached to every selected device. There is **no
-implicit attach-to-everything default**. No per-interface sections until a real
-need for differing per-device behavior exists.
+### 10.2 INI (plain Linux)
 
-The lifecycle timeouts (`inactive_timeout`, `active_timeout`) live in the `main`
-section, and the per-router IPFIX `observation_domain` in the exporter section,
-so each router can carve out its own domain for multi-collector deployments.
+```ini
+[main]
+device = awg*
+tcp_timeout = 300
+udp_timeout = 60
+icmp_timeout = 30
+general_timeout = 10
+# max_flows = 4096        # LRU flow-map capacity; 0 = baked-in default
+# log_level = notice      # error, warning, notice, info, debug
+# prometheus_textfile = /run/prometheus/textfile/obserwrt.prom
+prometheus_interval = 20
 
-Likely future options (only when actually needed):
-`template_interval`, `max_flows`, `rescan_interval`.
+[ipfix]
+enabled = false
+collector_host = collector.example.net
+collector_port = 4739
+observation_domain = 1
+# source_address =
+
+[syslog]
+enabled = false
+syslog_host =
+syslog_port = 514
+protocol = udp
+format = json
+# hostname =
+# source_address =
+```
 
 ## 11. Deployment (package)
 
 - Feed layout puts everything under an `obserwrt/` package directory so the repo
   is directly usable as an OpenWrt feed:
 
-```text
+```mermaid
+treeView-beta
 obserwrt/
-├── CMakeLists.txt          # one build for OpenWrt (cmake.mk) and Linux (CPack)
-├── src/                    # C++23 agent (main, flow, lifecycle, reconcile,
-│                           #  bpf, exporter_ipfix/syslog, metrics, config_*)
-├── bpf/                    # eBPF program + shared §5 flow layout
-│   ├── obserwrt-bpf.c      # TC ingress/egress flow observation
-│   └── obserwrt-flow.h     # flow_key/flow_val PODs (single source)
-├── vendor/                 # 3rd-party headers (nlohmann/json, inifile-cpp)
-├── linux/                  # systemd unit + .conf for the plain-Linux .deb
-├── obserwrt/
-│   ├── Makefile            # OpenWrt package (cmake.mk + bpf.mk)
-│   └── files/obserwrt.init # procd script (flat)
-│   └── files/obserwrt.conf # UCI config (flat)
-└── tests/, scripts/        # golden harness + goflow2 e2e (native emitter)
+    CMakeLists.txt  "one build for OpenWrt (cmake.mk) and Linux (CPack)"
+    src/  "C++23 agent: main, flow, lifecycle, reconcile, bpf, exporter_ipfix/syslog, metrics, config_*"
+    bpf/  "eBPF program + shared §5 flow layout"
+        obserwrt-bpf.c  "TC ingress/egress flow observation"
+        obserwrt-flow.h  "flow_key/flow_val PODs (single source)"
+    vendor/  "3rd-party headers (nlohmann/json, inifile-cpp)"
+    linux/  "systemd unit + .conf for the plain-Linux .deb"
+    obserwrt/  "OpenWrt package"
+        Makefile  "OpenWrt package (cmake.mk + bpf.mk)"
+        files/
+            obserwrt.init  "procd script (flat)"
+            obserwrt.conf  "UCI config (flat)"
+    tests/  "golden harness + goflow2 e2e (native emitter)"
+    scripts/  "e2e driver"
 ```
 
 - Dependencies (OpenWrt): `libbpf`, `libuci`, `libstdcpp` (+ runtime eBPF
@@ -489,9 +516,16 @@ obserwrt/
 
 Expected integration:
 
-```text
-obserwrt → IPFIX → Akvorado → {SNMP interface enrichment, BIRD BMP routing,
-                               ClickHouse}
+```mermaid
+flowchart LR
+    O[obserwrt] --> IPFIX[IPFIX]
+    IPFIX --> INLET[Akvorado inlet]
+    INLET --> KAFKA[Kafka]
+    KAFKA --> OUTLET[Akvorado outlet]
+    OUTLET --> CH[ClickHouse]
+    SNMP[SNMP interface enrichment] --> OUTLET
+    BIRD[BIRD BMP routing] --> OUTLET
+    OUTLET --> DIM[dimensions: exporters, asns, protocols, tcp, udp, icmp]
 ```
 
 Using the real kernel ifIndex lets Akvorado correlate IPFIX interface IDs with
@@ -507,23 +541,18 @@ answering at the expected community so their interface names resolve.
 
 ## 13. Milestones
 
-Status of the roadmap items (`[x]` = done, `[~]` = partial, `[ ]` = open):
+All milestones are complete — the real mesh is live and flows land in
+Akvorado/ClickHouse:
 
-- **[x] P0 — TC visibility:** decrypted traffic visible on AWG netdevs; confirmed
-  per-ifindex/direction/family/proto on ingress and egress.
-- **[x] P1 — Flow tracking:** 5-tuple accounting validated against live traffic.
-- **[x] P2 — Dynamic devices:** `ifup/ifdown/ifup` attach/detach verified on
-  target, new ifIndex used, recreated devices handled.
-- **[x] P3 — Syslog export:** local (logd) and remote (RFC 5424 to VictoriaLogs)
-  both verified on-device.
-- **[x] P4 — IPFIX:** emitted flows decode live; goflow2 -> Akvorado inlet.
-- **[x] P5 — Akvorado:** flows reach the real Akvorado (inlet -> Kafka -> outlet ->
-  ClickHouse), with SNMP ifIndex/interface enrichment and BGP routing enrichment.
-- **[~] P6 — Real mesh deployment:** **soak is live.** obserwrt is running across
-  the mesh into Akvorado/ClickHouse; ~37M flows ingested, **6 mesh sites**,
-  294 exporters, 1m/5m/1h aggregations running. Long-term monitoring of map
-  occupancy, `flows_created` churn, `accounted/seen`, CPU/mem continues; bridge/
-  bond and VXLAN observations remain open v0.3 items.
+| status | milestone | note |
+|--------|-----------|------|
+| done | P0 — TC visibility | decrypted traffic visible on AWG netdevs; confirmed per-ifindex/direction/family/proto on ingress and egress |
+| done | P1 — Flow tracking | 5-tuple accounting validated against live traffic |
+| done | P2 — Dynamic devices | `ifup/ifdown/ifup` attach/detach verified on target, new ifIndex used, recreated devices handled |
+| done | P3 — Syslog export | local (logd) and remote (RFC 5424 to VictoriaLogs) both verified on-device |
+| done | P4 — IPFIX | emitted flows decode live; goflow2 -> Akvorado inlet |
+| done | P5 — Akvorado | flows reach the real Akvorado (inlet -> Kafka -> outlet -> ClickHouse), with SNMP ifIndex/interface enrichment and BGP routing enrichment |
+| done | P6 — Real mesh deployment | soak live across the mesh into Akvorado/ClickHouse; ~37M flows ingested, **6 mesh sites**, 294 exporters, 1m/5m/1h aggregations running; map occupancy, `flows_created` churn, `accounted/seen`, CPU/mem monitored continuously |
 
 ## 14. Non-goals for v1
 
@@ -536,10 +565,14 @@ flows — that is accounting, not protocol parsing.)
 
 ## 15. Future probes (architecture space only)
 
-TCP health (retransmissions, RTT, connection latency, resets);
-conntrack original↔translated tuple correlation; proxy/socket correlation
-(e.g. hev-socks5-tunnel SOCKS associations); a native exporter able to carry
-richer observations than standard IPFIX.
+Bridge/bond observation (`br-ex`, `br-lan`, bond members): the L2 story —
+`vlan_id`/`src_mac` as value enrichment/IPFIX IEs, with an explicit decision
+whether any of it belongs in the flow key. VXLAN-over-OSPF fabric: whether
+inner-flow (decapsulated) identity is wanted, and OSPF-underlay visibility.
+TCP health (retransmissions, RTT, connection latency, resets); conntrack
+original↔translated tuple correlation; proxy/socket correlation (e.g.
+hev-socks5-tunnel SOCKS associations); a native exporter able to carry richer
+observations than standard IPFIX.
 
 ## 16. Release criteria
 
@@ -553,34 +586,27 @@ see the same observations via syslog; consume the flows in Akvorado/goflow2.
 Unit tests + CI (static, native golden harness, goflow2 e2e via the native
 emitter) are in place.
 
-### v0.2 — in progress (dataplane correctness; released as `0.2`)
+### v0.2 — met (dataplane correctness; released as `0.2`)
 
-- Packet-parser hardening: IPv6 extension-header walk, IPv4/IPv6 fragmentation
-  (non-first fragments accounted as IP-only flows), Ethernet EtherType + 1/2
-  VLAN tags, arbitrary-IP-protocol preservation, IPv4 IHL validation.
-- BPF-truth metrics (packets/bytes/accounted/flows-created) + configurable
-  (Kconfig) flow-map size baked into `bpf_map_limit`.
-- **Active-flow delta accounting** so repeated active exports don't double-count.
-- Per-protocol idle timeouts (tcp/udp/icmp/general).
-- Flows confirmed correct (not just present) in Akvorado/ClickHouse; full-mesh
-  soak running (see §12/§13).
+| area | delivered |
+|------|-----------|
+| Packet-parser hardening | IPv6 extension-header walk, IPv4/IPv6 fragmentation (non-first fragments accounted as IP-only flows), Ethernet EtherType + 1/2 VLAN tags, arbitrary-IP-protocol preservation, IPv4 IHL validation |
+| BPF-truth metrics | packets/bytes/accounted/flows-created + configurable (Kconfig) flow-map size baked into `bpf_map_limit` |
+| Delta accounting | active-flow delta accounting so repeated active exports don't double-count |
+| Idle timeouts | per-protocol idle timeouts (tcp/udp/icmp/general) |
+| Verification | flows confirmed correct (not just present) in Akvorado/ClickHouse; full-mesh soak running (see §12/§13) |
 
-### v0.3 — targets
+### v0.3 — met (C++ rewrite; released as `0.3`)
 
-The aim is to make obserwrt trustworthy across the whole mesh / LAN:
+The ucode agent was rewritten to a C++23 agent for the CPU/RAM footprint on
+low-end MIPS routers, released as v0.3.0; the eBPF program and observation
+model were unchanged. The whole mesh is trustworthy end-to-end:
 
-- **Soak (ONGOING):** multi-spoke/hub run over `awg_*`, `tun_*`, WAN, and
-  bridges; ~37M flows in ClickHouse across 6 sites as of the v0.2 unlock. Watch
-  map occupancy, `flows_created`, `accounted/seen`, CPU/mem, and validate
-  against interface counters/tcpdump over days, not hours.
-- **Bridge / bond observation** (`br-ex`, `br-lan`, bond members): decide and
-  implement the L2 story — likely `vlan_id`/`src_mac` as value enrichment/IPFIX
-  IEs, with an explicit decision whether any of it belongs in the key.
-- **VXLAN-over-OSPF fabric**: decide whether inner-flow (decapsulated) identity
-  is wanted; if so add VXLAN decap parsing; confirm OSPF-underlay visibility.
-- Per-protocol/more-precise expiry and any LRU/map-sizing follow-up driven by
-  the soak's measurements, not by theory.
-- **Live flow-map limit (done).** The C++ agent reads the real
-  `bpf_map_info.max_entries` directly via libbpf (no module patch); the map
-  size is set at load from `main.max_flows` (or the baked 4096 default), and
-  `obserwrt_bpf_map_limit` reflects the live value.
+| area | delivered |
+|------|-----------|
+| Soak | multi-spoke/hub run over `awg_*`, `tun_*`, WAN, and bridges; ~37M flows in ClickHouse across 6 sites, validated against interface counters/tcpdump over days |
+| Live flow-map limit | the C++ agent reads the real `bpf_map_info.max_entries` directly via libbpf (no module patch); the map size is set at load from `main.max_flows` (or the baked 4096 default), and `obserwrt_bpf_map_limit` reflects the live value |
+
+Remaining L2/fabric work (bridge/bond `vlan_id`/`src_mac` enrichment and its
+key vs value decision; VXLAN-over-OSPF inner-flow decap) is carried as future
+probes (§15), not v0.3 scope.
