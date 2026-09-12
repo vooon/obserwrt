@@ -10,11 +10,12 @@ selected Linux netdevs via TC ingress/egress, tracks flows in a BPF hash map,
 and exports normalized observations to IPFIX (Akvorado) and a syslog exporter.
 The original ucode agent (≤ v0.2.6) was rewritten to C++ for the CPU/RAM
 footprint of the ucode VM on low-end MIPS routers, released as v0.3.0, and the
-ucode implementation removed; the eBPF
-program and the observation model are unchanged.
+ucode implementation removed; the eBPF program and the observation model are
+unchanged.
 
 Authoritative design: [`docs/design.md`](docs/design.md). Read it before making
-architectural changes. Do not let the implementation drift from it.
+architectural changes. Do not let the implementation drift from it. Sections
+below link to it rather than restating it; keep them as pointers, not copies.
 
 ## Core rule (do not violate)
 
@@ -30,75 +31,34 @@ architectural changes. Do not let the implementation drift from it.
 - No implicit "attach to everything" default; observation points are explicit.
 - Startup with zero matching devices is a successful READY state.
 
-## Key design decisions (locked)
+## Do not
 
-- **Flow key (46 B, packed, native endian):** `u32 ifindex; u8 direction; u8
-  family; u8 protocol; u8 icmp_type; u8 icmp_code; u8 reserved; u8 src[16]; u8
-  dst[16]; u16 sport; u16 dport`.
-  Single source: `bpf/obserwrt-flow.h`, shared by the eBPF program and the C++
-  agent (`flow.hpp` types it as `FlowKey`); native byte order, no portability
-  layer. The reserved byte keeps `src`/`dst` 4-byte aligned; `icmp_type`/
-  `icmp_code` are 0 for TCP/UDP, and `sport`/`dport` are 0 for ICMP.
-- **Flow value (40 B):** `u64 packets; u64 bytes; u64 first_seen; u64 last_seen;
-  u16 tcp_flags` (naturally aligned: counters must be 8-byte aligned for atomic
-  increments). `tcp_flags` is a 16-bit `tcpControlBits` union (only the standard
-  low-8 TCP flags are accumulated; use OR, not sum). Same shared header.
-- **Address normalization:** IPv4 stored as IPv4-mapped IPv6 `::ffff:a.b.c.d`
-  in the 16-byte fields. `family` is retained in the key for alignment/debug.
-- **Interface identity:** real kernel ifIndex, read at attach time via
-  `if_nametoindex`. Recreated devices get a new ifIndex; always attach to the
-  current incarnation. Never invent static obserwrt interface IDs.
-- **Reconciliation (rtnetlink):** startup `RTM_GETLINK` enumeration of existing
-  devices, then subscribe to live `RTM_NEWLINK`/`RTM_DELLINK` (the group must
-  be in the `bind()` sockaddr — `netlink_bind` replaces prior setsockopt
-  membership). `up`/`add` -> attach, `down`/remove -> detach + purge that
-  device's entries. A rename of an attached device detaches when it no longer
-  matches, else refreshes the stored name. **No periodic rescan.**
-- **Self-observability:** Prometheus via the node-exporter textfile collector
-  (`/run/prometheus/textfile/obserwrt.prom`, atomic temp+rename). obserwrt
+- Expose real/internal device names or IPs in examples/docs — use generic
+  placeholders (`awg0`, `awg_*`, `tun_*`, `br-lan`, `eth0`) and RFC 5737 test
+  addresses (`192.0.2.0/24`, `198.51.100.0/24`).
+- Implement an HTTP/metrics server in obserwrt.
+- Add dependencies beyond those actually needed; keep the package lean.
+
+## Locked design decisions
+
+The authoritative detail lives in `docs/design.md`; do not change these without
+deliberate, incompatible intent (see design §4/§5/§6/§8):
+
+- **Wire format (§5):** flow key/value PODs live once in
+  `bpf/obserwrt-flow.h` (shared by eBPF and the agent via `flow.hpp`), native
+  byte order, `_Static_assert`-pinned sizes. Changing the key/value layout or an
+  IPFIX metric NAME is a deliberate incompatibility.
+- **Address normalization (§5.3):** IPv4 stored as IPv4-mapped IPv6 `::ffff:`
+  in the 16-byte fields.
+- **Interface identity (§6):** real kernel ifIndex via `if_nametoindex`, read at
+  attach time; always attach to the current incarnation of a recreated device.
+- **Reconciliation (§6.2):** rtnetlink only — startup `RTM_GETLINK`, live
+  `RTM_NEWLINK`/`RTM_DELLINK`; no periodic rescan, no netifd/ubus.
+- **IPFIX (§8.1):** two templates branching on the `::ffff:` prefix; big-endian
+  wire encoding; `MAX_UDP` datagrams handed to the transport as `std::byte`
+  spans.
+- **Self-observability (§9):** Prometheus textfile collector only — obserwrt
   must **not** implement an HTTP server. No per-flow labels.
-- **IPFIX:** `destination` accepts an IP or hostname (resolved via the target's
-  resolver). Two templates branching on the `::ffff:` prefix — v4 emits
-  `sourceIPv4Address`/`destinationIPv4Address` (last 4 bytes), otherwise IPv6
-  IEs. Wire encoding is big-endian (`std::byteswap` appenders in the exporter);
-  datagrams are `std::byte` buffers handed to the transport as spans.
-
-## Directory layout
-
-```text
-obserwrt/                     # OpenWrt package (also a feed root)
-├── CMakeLists.txt            # one build for OpenWrt (cmake.mk) and Linux (CPack)
-├── src/                      # C++23 agent
-│   ├── main.cpp              # epoll loop, exporters, reconcile wiring
-│   ├── flow.hpp              # §5 key/value types (alias of bpf/obserwrt-flow.h)
-│   ├── bpf.cpp               # libbpf: map, walk, tcx attach, stats
-│   ├── lifecycle.cpp         # delta accounting + per-proto expiry
-│   ├── reconcile.cpp         # rtnetlink dump + RTM_NEWLINK/RTM_DELLINK
-│   ├── exporter_ipfix.cpp    # IPFIX (templates 256/257, chunking)
-│   ├── exporter_syslog.cpp   # RFC 5424 json/logfmt, local/remote
-│   ├── metrics.cpp           # Prometheus textfile + build_info
-│   ├── config_uci.cpp        # OpenWrt libuci backend
-│   ├── config_mini.cpp       # plain-Linux inifile-cpp backend
-│   ├── udp_client.cpp        # dual-stack (v4/v6) remote UDP endpoint
-│   ├── prometheus.cpp        # exposition builder (HELP/TYPE once, labels)
-│   ├── log.hpp               # DAEMON_LOG gated by main.log_level
-│   └── version.hpp           # build_info {version,commit,os,arch}
-├── bpf/                      # eBPF program (C) + shared §5 wire-format header
-│   ├── obserwrt-bpf.c        # TC ingress/egress flow observation
-│   └── obserwrt-flow.h       # flow_key/flow_val PODs (single source)
-├── vendor/                   # 3rd-party headers (nlohmann/json, inifile-cpp)
-├── linux/                    # systemd unit + .conf for the plain-Linux .deb
-├── obserwrt/
-│   ├── Makefile              # OpenWrt package (cmake.mk + bpf.mk)
-│   └── files/obserwrt.init   # procd script (flat)
-│   └── files/obserwrt.conf   # UCI config (flat)
-├── tests/                    # golden harness + native goflow2 e2e emitter
-└── scripts/                  # e2e driver
-```
-
-`src/obserwrt-bpf.c` now lives in `bpf/`; the feeds/layout line below reflects
-that. The eBPF program is compiled from source via `include/bpf.mk` (OpenWrt)
-or clang (Linux CMake) — never checked in.
 
 ## Dependencies
 
@@ -106,6 +66,26 @@ Running the OpenWrt package: `libbpf`, `libuci`, `libstdcpp`. Plain Linux:
 `libbpf1`, `libstdc++6`. Vendored single headers: `nlohmann/json`,
 `inifile-cpp` (MIT). The eBPF object is built from source — via
 `include/bpf.mk` (OpenWrt) or clang (Linux CMake) — never checked in.
+
+## Layout
+
+Source map (see design §11 for the full feed layout):
+
+| path | role |
+|------|------|
+| `src/main.cpp` | epoll loop, exporters, reconcile wiring |
+| `src/bpf.cpp` | libbpf: map, walk, tcx attach, stats |
+| `src/lifecycle.cpp` | delta accounting + per-proto expiry |
+| `src/reconcile.cpp` | rtnetlink dump + RTM_NEWLINK/RTM_DELLINK |
+| `src/exporter_ipfix.cpp` | IPFIX (templates 256/257, chunking) |
+| `src/exporter_syslog.cpp` | RFC 5424 json/logfmt, local/remote |
+| `src/metrics.cpp` | Prometheus textfile + build_info |
+| `src/config_uci.cpp` / `src/config_mini.cpp` | UCI / INI config backends |
+| `src/udp_client.cpp` | dual-stack (v4/v6) remote UDP endpoint |
+| `src/log.hpp` / `src/version.hpp` | DAEMON_LOG, build_info |
+| `bpf/obserwrt-bpf.c` / `bpf/obserwrt-flow.h` | eBPF program + shared §5 header |
+| `vendor/`, `linux/`, `obserwrt/files/` | headers, systemd unit/.conf, procd scripts |
+| `tests/`, `scripts/` | golden harness + goflow2 e2e emitter |
 
 ## Commands
 
@@ -141,32 +121,6 @@ build/obserwrt -c linux/obserwrt.conf
 # OpenWrt (after package install): /etc/init.d/obserwrt {start,restart,info}
 ```
 
-## Conventions
-
-- **C++23**, exceptions-free (`-fno-exceptions`; inifile-cpp is the only TU
-  compiled with `-fexceptions`), no iostream. Optimization follows the image/
-  host toolchain (`-Os`/`-O2`); never hardcode it.
-- Wire formats are owned by `bpf/obserwrt-flow.h` (PODs with `_Static_assert`
-  sizes) and the golden harness; change the `§5` key/value layout or any IPFIX
-  metric NAME only as a deliberate incompatibility.
-- Big-endian safeness: the BPF map is native-endian; only the IPFIX wire
-  encoding byte-swaps (via `std::byteswap` in the exporter).
-- Daemon diagnostics go through `DAEMON_LOG` (`src/log.hpp`), gated by
-  `main.log_level`; never `setlogmask()` (it would mute the syslog exporter's
-  local flow records). Device/link events are observable at `debug`.
-- Config lives behind the `Config` facade (`config_uci.cpp`/`config_mini.cpp`);
-  one option set, two backends.
-- Do not check in compiled `.o`/eBPF objects; build from source.
-
-## Do not
-
-- Expose real/internal device names or IPs in examples/docs — use generic
-  placeholders (`awg0`, `awg_*`, `tun_*`, `br-lan`, `eth0`) and RFC 5737 test
-  addresses (`192.0.2.0/24`, `198.51.100.0/24`).
-- Implement an HTTP/metrics server in obserwrt.
-- Add dependencies beyond those actually needed; keep the package lean.
-- Begin an IPFIX feature before the P0 TC-visibility probe is proven.
-
 ## Testing (see also `.github/workflows/ci.yml`)
 
 - **goflow2 e2e** (`scripts/test-ipfix.sh`, native): builds `obserwrt-emit`
@@ -179,8 +133,18 @@ build/obserwrt -c linux/obserwrt.conf
   lifecycle delta/expiry contract, syslog JSON/logfmt/envelopes, the Prometheus
   exposition, and both config backends.
 
-## Milestones (see design §13)
+## Conventions
 
-P0 TC visibility → P1 flow tracking → P2 dynamic devices → P3 debug export →
-P4 IPFIX → P5 Akvorado → P6 real mesh. Gate each export/exporter step on the
-prior probe.
+- **C++23**, exceptions-free (`-fno-exceptions`; inifile-cpp is the only TU
+  compiled with `-fexceptions`), no iostream. Optimization follows the image/
+  host toolchain (`-Os`/`-O2`); never hardcode it.
+- Wire formats are owned by `bpf/obserwrt-flow.h` and the golden harness (see
+  Locked design decisions).
+- Big-endian safeness: the BPF map is native-endian; only the IPFIX wire
+  encoding byte-swaps (via `std::byteswap` in the exporter).
+- Daemon diagnostics go through `DAEMON_LOG` (`src/log.hpp`), gated by
+  `main.log_level`; never `setlogmask()` (it would mute the syslog exporter's
+  local flow records). Device/link events are observable at `debug`.
+- Config lives behind the `Config` facade (`config_uci.cpp`/`config_mini.cpp`);
+  one option set, two backends.
+- Do not check in compiled `.o`/eBPF objects; build from source.
