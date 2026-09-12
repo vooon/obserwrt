@@ -529,22 +529,24 @@ Expected integration:
 ```mermaid
 flowchart LR
     subgraph ROUTER[router]
+        direction LR
         O[obserwrt]
         SNMPD[snmpd]
     end
-    O --> IPFIX[IPFIX]
-    IPFIX --> INLET[Akvorado Inlet]
-    INLET --> KAFKA[Kafka]
-    KAFKA --> OUTLET[Akvorado Outlet]
-    OUTLET --> CH[ClickHouse]
     subgraph AKV[Akvorado]
-        INLET
-        KAFKA
-        OUTLET
-        CH
+        direction LR
+        INLET[Akvorado Inlet]
+        KAFKA[Kafka]
+        OUTLET[Akvorado Outlet]
+        CH[ClickHouse]
         ENR[SNMP interface enrichment]
         DIM[dimensions: exporters, asns, protocols, tcp, udp, icmp]
     end
+    ROUTER --> IPFIX[IPFIX]
+    IPFIX --> AKV
+    INLET --> KAFKA
+    KAFKA --> OUTLET
+    OUTLET --> CH
     OUTLET --> ENR
     ENR --> SNMP[SNMP]
     SNMP --> SNMPD

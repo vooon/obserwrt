@@ -8,10 +8,9 @@ Guidance for AI coding agents working in this repository.
 built on a C++23 agent (libbpf, rtnetlink, libuci). It observes traffic on
 selected Linux netdevs via TC ingress/egress, tracks flows in a BPF hash map,
 and exports normalized observations to IPFIX (Akvorado) and a syslog exporter.
-The original ucode agent (≤ v0.2.6) was rewritten to C++ for the CPU/RAM
-footprint of the ucode VM on low-end MIPS routers, released as v0.3.0, and the
-ucode implementation removed; the eBPF program and the observation model are
-unchanged.
+The agent was rewritten to C++23 (from the original ucode, at v0.3.0) for the
+CPU/RAM footprint on low-end MIPS routers; the eBPF program and the observation
+model are unchanged.
 
 Authoritative design: [`docs/design.md`](docs/design.md). Read it before making
 architectural changes. Do not let the implementation drift from it. Sections
