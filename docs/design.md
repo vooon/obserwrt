@@ -8,11 +8,11 @@
 ## 1. Goal
 
 `obserwrt` is an OpenWrt-native network observation agent built around eBPF
-and a lightweight C++23 agent. It was introduced as a ucode agent; the ucode
-VM's CPU/RAM footprint on low-end MIPS routers drove a rewrite in C++
-(v0.2.6 → v0.3.0)
-where the eBPF program and the normalized observation model stayed unchanged,
-and the ucode implementation was removed. It provides data-plane visibility:
+and a lightweight agent. It was introduced as a ucode agent; the ucode VM's
+CPU/RAM footprint on low-end MIPS routers drove a rewrite in C++
+(v0.2.6 → v0.3.0) where the eBPF program and the normalized observation model
+stayed unchanged, and the ucode implementation was removed. It provides
+data-plane visibility:
 
 - who is communicating with whom;
 - which Linux network device traffic actually traverses;
@@ -32,9 +32,9 @@ VXLAN, physical Ethernet.
 VPN hubs, PBR, Akvorado, service identity, or whether an address is internal or
 external. That meaning belongs to downstream enrichment.
 
-**OpenWrt-native first, portable host.** v2 uses a C++23 agent (libbpf,
-rtnetlink, libuci/libstdc++ on OpenWrt; a plain UDP/IPFIX/syslog/socket path on
-Linux), UCI/procd on OpenWrt and a systemd/.conf path on plain Linux. The eBPF
+**OpenWrt-native first, portable host.** v2 uses an agent (libbpf, rtnetlink,
+libuci/libstdc++ on OpenWrt; a plain UDP/IPFIX/syslog/socket path on Linux),
+UCI/procd on OpenWrt and a systemd/.conf path on plain Linux. The eBPF
 programs and the normalized observation model must nonetheless avoid
 unnecessary OpenWrt-specific semantics so the same programs could be reused by
 a future general Linux agent.
@@ -46,7 +46,7 @@ be designed as an IPFIX record.
 ```mermaid
 flowchart TD
     EBPF[eBPF] --> RAW[raw flow state]
-    RAW --> AGT[obserwrt agent C++23]
+    RAW --> AGT[obserwrt agent]
     AGT --> OBS[normalized observation]
     OBS --> IPFIX[IPFIX exporter]
     OBS --> SLOG[syslog exporter]
@@ -157,7 +157,7 @@ future parser extension, not planned for v1.
 | icmp_code | 45     | `u8`      | 1     |
 
 The structs live once in `bpf/obserwrt-flow.h`, shared by the eBPF program and
-the C++ agent (`flow.hpp` types them as `FlowKey`/`FlowValue`). Native byte
+the agent (`flow.hpp` types them as `FlowKey`/`FlowValue`). Native byte
 order on the local machine — the map is written and read on the same host.
 The reported byte offsets above are the `_Static_assert`-pinned layout; the
 reserved byte keeps `src` and `dst` 4-byte aligned within the packed struct.
@@ -489,7 +489,7 @@ format = json
 treeView-beta
 obserwrt/ ## feed root, also an OpenWrt package
     CMakeLists.txt ## one build for OpenWrt (cmake.mk) and Linux (CPack)
-    src/ ## C++23 agent: main, flow, lifecycle, reconcile, bpf, exporters, metrics, config_*
+    src/ ## agent: main, flow, lifecycle, reconcile, bpf, exporters, metrics, config_*
         main.cpp ## epoll loop, exporters, reconcile wiring
         bpf.cpp ## libbpf: map, walk, tcx attach, stats
         lifecycle.cpp ## delta accounting + per-proto expiry
@@ -624,14 +624,14 @@ emitter) are in place.
 
 ### v0.3 — met (C++ rewrite; released as `0.3`)
 
-The ucode agent was rewritten to a C++23 agent for the CPU/RAM footprint on
-low-end MIPS routers, released as v0.3.0; the eBPF program and observation
-model were unchanged. The whole mesh is trustworthy end-to-end:
+The ucode agent was rewritten in C++ for the CPU/RAM footprint on low-end MIPS
+routers, released as v0.3.0; the eBPF program and observation model were
+unchanged. The whole mesh is trustworthy end-to-end:
 
 | area | delivered |
 |------|-----------|
 | Soak | multi-spoke/hub run over `awg_*`, `tun_*`, WAN, and bridges; ~37M flows in ClickHouse across 6 sites, validated against interface counters/tcpdump over days |
-| Live flow-map limit | the C++ agent reads the real `bpf_map_info.max_entries` directly via libbpf (no module patch); the map size is set at load from `main.max_flows` (or the baked 4096 default), and `obserwrt_bpf_map_limit` reflects the live value |
+| Live flow-map limit | the agent reads the real `bpf_map_info.max_entries` directly via libbpf (no module patch); the map size is set at load from `main.max_flows` (or the baked 4096 default), and `obserwrt_bpf_map_limit` reflects the live value |
 
 Remaining L2/fabric work (bridge/bond `vlan_id`/`src_mac` enrichment and its
 key vs value decision; VXLAN-over-OSPF inner-flow decap) is carried as future
