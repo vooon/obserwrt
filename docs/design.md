@@ -527,31 +527,31 @@ obserwrt/ ## feed root, also an OpenWrt package
 Expected integration:
 
 ```mermaid
+---
+config:
+  layout: "elk"
+---
 flowchart LR
-    subgraph ROUTER[router]
-        direction LR
-        O[obserwrt]
-        SNMPD[snmpd]
-    end
-    subgraph AKV[Akvorado]
-        direction LR
-        INLET[Akvorado Inlet]
-        KAFKA[Kafka]
-        OUTLET[Akvorado Outlet]
-        CH[ClickHouse]
-        ENR[SNMP interface enrichment]
-        DIM[dimensions: exporters, asns, protocols, tcp, udp, icmp]
-    end
-    ROUTER --> IPFIX[IPFIX]
-    IPFIX --> AKV
-    INLET --> KAFKA
-    KAFKA --> OUTLET
-    OUTLET --> CH
-    OUTLET --> ENR
-    ENR --> SNMP[SNMP]
-    SNMP --> SNMPD
-    BIRD[BIRD BMP routing] --> OUTLET
-    OUTLET --> DIM
+  subgraph ROUTER[Router]
+      O[obserwrt]
+      SNMPD[snmpd]
+      BIRD[bird]
+  end
+
+  subgraph AKV[Akvorado]
+      INLET[Akvorado Inlet]
+      KAFKA@{label: "Kafka", shape: bow-rect }
+      OUTLET[Akvorado Outlet]
+      CH[(ClickHouse)]
+  end
+
+  O -- IPFIX --> INLET
+  OUTLET -- SNMP --> SNMPD
+  BIRD -- BMP --> OUTLET
+
+  INLET --> KAFKA
+  KAFKA --> OUTLET
+  OUTLET --> CH
 ```
 
 Using the real kernel ifIndex lets Akvorado correlate IPFIX interface IDs with
