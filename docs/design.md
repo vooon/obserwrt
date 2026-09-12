@@ -528,14 +528,28 @@ Expected integration:
 
 ```mermaid
 flowchart LR
-    O[obserwrt] --> IPFIX[IPFIX]
-    IPFIX --> INLET[Akvorado inlet]
+    subgraph ROUTER[router]
+        O[obserwrt]
+        SNMPD[snmpd]
+    end
+    O --> IPFIX[IPFIX]
+    IPFIX --> INLET[Akvorado Inlet]
     INLET --> KAFKA[Kafka]
-    KAFKA --> OUTLET[Akvorado outlet]
+    KAFKA --> OUTLET[Akvorado Outlet]
     OUTLET --> CH[ClickHouse]
-    SNMP[SNMP interface enrichment] --> OUTLET
+    subgraph AKV[Akvorado]
+        INLET
+        KAFKA
+        OUTLET
+        CH
+        ENR[SNMP interface enrichment]
+        DIM[dimensions: exporters, asns, protocols, tcp, udp, icmp]
+    end
+    OUTLET --> ENR
+    ENR --> SNMP[SNMP]
+    SNMP --> SNMPD
     BIRD[BIRD BMP routing] --> OUTLET
-    OUTLET --> DIM[dimensions: exporters, asns, protocols, tcp, udp, icmp]
+    OUTLET --> DIM
 ```
 
 Using the real kernel ifIndex lets Akvorado correlate IPFIX interface IDs with
