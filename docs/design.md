@@ -487,21 +487,31 @@ format = json
 
 ```mermaid
 treeView-beta
-obserwrt/
-    CMakeLists.txt  "one build for OpenWrt (cmake.mk) and Linux (CPack)"
-    src/  "C++23 agent: main, flow, lifecycle, reconcile, bpf, exporter_ipfix/syslog, metrics, config_*"
-    bpf/  "eBPF program + shared §5 flow layout"
-        obserwrt-bpf.c  "TC ingress/egress flow observation"
-        obserwrt-flow.h  "flow_key/flow_val PODs (single source)"
-    vendor/  "3rd-party headers (nlohmann/json, inifile-cpp)"
-    linux/  "systemd unit + .conf for the plain-Linux .deb"
-    obserwrt/  "OpenWrt package"
-        Makefile  "OpenWrt package (cmake.mk + bpf.mk)"
+obserwrt/ ## feed root, also an OpenWrt package
+    CMakeLists.txt ## one build for OpenWrt (cmake.mk) and Linux (CPack)
+    src/ ## C++23 agent: main, flow, lifecycle, reconcile, bpf, exporters, metrics, config_*
+        main.cpp ## epoll loop, exporters, reconcile wiring
+        bpf.cpp ## libbpf: map, walk, tcx attach, stats
+        lifecycle.cpp ## delta accounting + per-proto expiry
+        reconcile.cpp ## rtnetlink dump + RTM_NEWLINK/RTM_DELLINK
+        exporter_ipfix.cpp ## IPFIX (templates 256/257, chunking)
+        exporter_syslog.cpp ## RFC 5424 json/logfmt, local/remote
+        metrics.cpp ## Prometheus textfile + build_info
+        config_uci.cpp ## UCI backend (OpenWrt)
+        config_mini.cpp ## INI backend (plain Linux)
+        udp_client.cpp ## dual-stack remote UDP endpoint
+    bpf/ ## eBPF program + shared §5 flow layout
+        obserwrt-bpf.c ## TC ingress/egress flow observation
+        obserwrt-flow.h ## flow_key/flow_val PODs (single source)
+    vendor/ ## 3rd-party headers (nlohmann/json, inifile-cpp)
+    linux/ ## systemd unit + .conf for the plain-Linux .deb
+    obserwrt/ ## OpenWrt package dir
+        Makefile ## OpenWrt package (cmake.mk + bpf.mk)
         files/
-            obserwrt.init  "procd script (flat)"
-            obserwrt.conf  "UCI config (flat)"
-    tests/  "golden harness + goflow2 e2e (native emitter)"
-    scripts/  "e2e driver"
+            obserwrt.init ## procd script (flat)
+            obserwrt.conf ## UCI config (flat)
+    tests/ ## golden harness + native goflow2 e2e emitter
+    scripts/ ## e2e driver
 ```
 
 - Dependencies (OpenWrt): `libbpf`, `libuci`, `libstdcpp` (+ runtime eBPF
