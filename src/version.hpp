@@ -2,7 +2,7 @@
  * obserwrt - build/version info (version.hpp)
  *
  * Version, commit, os and arch are injected by the build system
- * (-DOBSEWRRT_*); never hardcoded here. Both the CLI --version output and the
+ * (-DOBSERWRT_*); never hardcoded here. Both the CLI --version output and the
  * obserwrt_build_info Prometheus metric read the same constexpr values so they
  * can never drift.
  */
@@ -11,38 +11,38 @@
 
 #include <string_view>
 
-#ifdef OBSEWRRT_VERSION
-#define OBSEWRRT_VERSION_STR OBSEWRRT_VERSION
+#ifdef OBSERWRT_VERSION
+#define OBSERWRT_VERSION_STR OBSERWRT_VERSION
 #else
-#define OBSEWRRT_VERSION_STR "unknown"
+#define OBSERWRT_VERSION_STR "unknown"
 #endif
 
-#ifdef OBSEWRRT_COMMIT
-#define OBSEWRRT_COMMIT_STR OBSEWRRT_COMMIT
+#ifdef OBSERWRT_COMMIT
+#define OBSERWRT_COMMIT_STR OBSERWRT_COMMIT
 #else
-#define OBSEWRRT_COMMIT_STR ""
+#define OBSERWRT_COMMIT_STR ""
 #endif
 
-#ifdef OBSEWRRT_OS
-#define OBSEWRRT_OS_STR OBSEWRRT_OS
+#ifdef OBSERWRT_OS
+#define OBSERWRT_OS_STR OBSERWRT_OS
 #else
-#define OBSEWRRT_OS_STR "unknown"
+#define OBSERWRT_OS_STR "unknown"
 #endif
 
-#ifdef OBSEWRRT_ARCH
-#define OBSEWRRT_ARCH_STR OBSEWRRT_ARCH
+#ifdef OBSERWRT_ARCH
+#define OBSERWRT_ARCH_STR OBSERWRT_ARCH
 #else
-#define OBSEWRRT_ARCH_STR "unknown"
+#define OBSERWRT_ARCH_STR "unknown"
 #endif
 
 namespace obserwrt
 {
 
 struct BuildInfo {
-	std::string_view version = OBSEWRRT_VERSION_STR;
-	std::string_view commit = OBSEWRRT_COMMIT_STR;
-	std::string_view os = OBSEWRRT_OS_STR;
-	std::string_view arch = OBSEWRRT_ARCH_STR;
+	std::string_view version = OBSERWRT_VERSION_STR;
+	std::string_view commit = OBSERWRT_COMMIT_STR;
+	std::string_view os = OBSERWRT_OS_STR;
+	std::string_view arch = OBSERWRT_ARCH_STR;
 };
 
 inline constexpr BuildInfo build_info()

@@ -26,7 +26,7 @@ jobs:
         run: |
           set -euo pipefail
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-            -DOBSEWRRT_BUILD_TESTS=ON
+            -DOBSERWRT_BUILD_TESTS=ON
           cmake --build build -j2 --target obserwrt-emit
 
       - name: Run goflow2 IPFIX e2e (decode emitted flows)
