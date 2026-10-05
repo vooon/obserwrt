@@ -92,19 +92,22 @@ Checks (defined in `.github/workflows/ci.yml`):
 
 ```sh
 # Native build + golden-vector harness (from the repo root; needs libbpf-dev)
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DOBSEWRRT_BUILD_TESTS=ON
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DOBSEWRRT_BUILD_TESTS=ON \
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
 
 # Formatting + static analysis
-clang-format --dry-run --Werror $(find src tests -name '*.[ch]pp')
+# clang-format is pinned (versions disagree on SLOG chains); same wheel as CI:
+uvx clang-format==22.1.8 --dry-run --Werror $(find src tests -name '*.[ch]pp')
+# clang-tidy only on the compile DB's sources (config_uci.cpp is OpenWrt-only):
 clang-tidy -p build -checks="-*,clang-analyzer-*,bugprone-*,-bugprone-easily-swappable-parameters,performance-*" \
-  -warnings-as-errors='*' src/*.cpp
+  -warnings-as-errors='*' $(jq -r '.[].file' build/compile_commands.json | grep /src/)
 
 # eBPF compile smoke, both byte orders (real headers, OpenWrt bpf.mk `uapi/` style)
 # Needs the system kernel UAPI + libbpf headers (linux-libc-dev, libbpf-dev):
-#   mkdir -p /tmp/uapi && ln -s /usr/include/linux /tmp/uapi/linux
-#   inc="-I/tmp/uapi -I/usr/include/x86_64-linux-gnu -I/usr/include"
+#   mkdir -p /tmp/bpfinc/uapi && ln -s /usr/include/linux /tmp/bpfinc/uapi/linux
+#   inc="-I/tmp/bpfinc -I/usr/include/x86_64-linux-gnu -I/usr/include"
 #   clang -O2 -g -target bpfel $inc -c bpf/obserwrt-bpf.c -o /tmp/bpfel.o
 #   clang -O2 -g -target bpfeb $inc -c bpf/obserwrt-bpf.c -o /tmp/bpfeb.o
 ```

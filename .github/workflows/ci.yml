@@ -69,7 +69,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            g++ cmake make clang-format clang-tidy libbpf-dev clang linux-libc-dev
+            g++ cmake make clang-tidy libbpf-dev clang linux-libc-dev
 
       - name: Configure + build (-Werror)
         run: |
@@ -83,10 +83,12 @@ jobs:
           ctest --test-dir build --output-on-failure
 
       - name: clang-format check (our sources, not the vendored inifile)
+        # Pinned: clang-format versions disagree on wrapping the SLOG(...)(...)
+        # chains, so CI and local use the same PyPI wheel (see AGENTS.md).
         run: |
           set -euo pipefail
           for f in $(find src tests -name '*.[ch]pp' | grep -v vendor); do
-            clang-format --dry-run --Werror "$f"
+            pipx run clang-format==22.1.8 --dry-run --Werror "$f"
           done
 
       - name: clang-tidy (compile DB, curated checks)
