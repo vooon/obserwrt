@@ -9,13 +9,16 @@
 # Usage: sh scripts/test-ipfix.sh [collector_host] [collector_port]
 # Env:   OBSERWRT_EMIT=<path to obserwrt-emit>  (default: $ROOT/build/obserwrt-emit)
 #        GOFLOW2=<path to goflow2 binary>       (default: goflow2 or docker
-#                                      netsampler/goflow2 on the host)
+#                                      $GOFLOW2_IMAGE on the host)
+#        GOFLOW2_IMAGE=<docker image>          (default: docker.io/netsampler/goflow2:v2.2.7)
 set -eu
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 HOST="${1:-127.0.0.1}"
 PORT="${2:-4739}"
 EMIT="${OBSERWRT_EMIT:-$ROOT/build/obserwrt-emit}"
+# Pinned: upstream re-pointed `latest` at the v1 line (different text format).
+GOFLOW2_IMAGE="${GOFLOW2_IMAGE:-docker.io/netsampler/goflow2:v2.2.7}"
 
 SCRATCH="$(mktemp -d)"
 LOG="$SCRATCH/goflow2.log"
@@ -34,7 +37,7 @@ elif command -v goflow2 >/dev/null 2>&1; then
 	store_pid=$!
 	sleep 1
 elif command -v docker >/dev/null 2>&1; then
-	cleanup_docker=$(docker run -d --rm --network host netsampler/goflow2 \
+	cleanup_docker=$(docker run -d --rm --network host "$GOFLOW2_IMAGE" \
 		-listen "netflow://$HOST:$PORT" -format text)
 	sleep 2
 else
