@@ -92,7 +92,7 @@ Checks (defined in `.github/workflows/ci.yml`):
 
 ```sh
 # Native build + golden-vector harness (from the repo root; needs libbpf-dev)
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DOBSEWRRT_BUILD_TESTS=ON \
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DOBSERWRT_BUILD_TESTS=ON \
   -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 cmake --build build
 ctest --test-dir build --output-on-failure

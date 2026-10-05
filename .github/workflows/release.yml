@@ -26,7 +26,7 @@ jobs:
             apt-get install -y -qq --no-install-recommends \
               cmake g++ make clang libbpf-dev linux-libc-dev
             cmake -S . -B build-deb -DCMAKE_BUILD_TYPE=Release \
-              -DOBSEWRRT_ENABLE_CPACK=ON -DOBSEWRRT_BUILD_TESTS=OFF
+              -DOBSERWRT_ENABLE_CPACK=ON -DOBSERWRT_BUILD_TESTS=OFF
             cmake --build build-deb -j"$(nproc)"
             cpack -B build-deb --config build-deb/CPackConfig.cmake -G DEB
           '

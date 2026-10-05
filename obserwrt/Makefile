@@ -32,11 +32,11 @@ endef
 # $(TARGET_CXXFLAGS)); null out CMake's own -O2 Release default so the image
 # flags stay authoritative (the Linux/CMake build keeps its -O2 .deb default).
 CMAKE_OPTIONS += \
-	-DOBSEWRRT_USE_LIBUCI=ON \
-	-DOBSEWRRT_OS=openwrt \
-	-DOBSEWRRT_ARCH=$(ARCH) \
-	-DOBSEWRRT_VERSION=$(PKG_VERSION) \
-	-DOBSEWRRT_BUILD_TESTS=OFF \
+	-DOBSERWRT_USE_LIBUCI=ON \
+	-DOBSERWRT_OS=openwrt \
+	-DOBSERWRT_ARCH=$(ARCH) \
+	-DOBSERWRT_VERSION=$(PKG_VERSION) \
+	-DOBSERWRT_BUILD_TESTS=OFF \
 	-DCMAKE_CXX_FLAGS_RELEASE=""
 
 # The daemon is built by CMake (Build/Compile/Default); the eBPF object is
