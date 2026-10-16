@@ -65,11 +65,15 @@ bool Bpf::load(const std::string &path, uint32_t max_flows, std::string *err)
 
 	flows_ = bpf_object__find_map_by_name(obj_, "obserwrt_flows");
 	stats_ = bpf_object__find_map_by_name(obj_, "obserwrt_stats");
-	prog_ingress_ = bpf_object__find_program_by_name(obj_, "obserwrt_ingress");
-	prog_egress_ = bpf_object__find_program_by_name(obj_, "obserwrt_egress");
-	if (!flows_ || !stats_ || !prog_ingress_ || !prog_egress_) {
+	prog_ingress_[0] = bpf_object__find_program_by_name(obj_, "obserwrt_ingress_l3");
+	prog_egress_[0] = bpf_object__find_program_by_name(obj_, "obserwrt_egress_l3");
+	prog_ingress_[1] = bpf_object__find_program_by_name(obj_, "obserwrt_ingress_eth");
+	prog_egress_[1] = bpf_object__find_program_by_name(obj_, "obserwrt_egress_eth");
+	if (!flows_ || !stats_ || !prog_ingress_[0] || !prog_egress_[0] || !prog_ingress_[1] ||
+	    !prog_egress_[1]) {
 		if (err)
-			*err = "obserwrt-bpf.o: missing map/program (flows/stats/ingress/egress)";
+			*err = "obserwrt-bpf.o: missing map/program (flows/stats/"
+			       "{ingress,egress}_{l3,eth})";
 		bpf_object__close(obj_);
 		obj_ = nullptr;
 		return false;
@@ -93,10 +97,12 @@ bool Bpf::load(const std::string &path, uint32_t max_flows, std::string *err)
 
 	/* libbpf >= 1.6 no longer infers SCHED_CLS from SEC("classifier/x"); the
 	 * tcx attach point below comes from the expected attach type. */
-	bpf_program__set_type(prog_ingress_, BPF_PROG_TYPE_SCHED_CLS);
-	bpf_program__set_type(prog_egress_, BPF_PROG_TYPE_SCHED_CLS);
-	bpf_program__set_expected_attach_type(prog_ingress_, BPF_TCX_INGRESS);
-	bpf_program__set_expected_attach_type(prog_egress_, BPF_TCX_EGRESS);
+	for (int i = 0; i < 2; i++) {
+		bpf_program__set_type(prog_ingress_[i], BPF_PROG_TYPE_SCHED_CLS);
+		bpf_program__set_type(prog_egress_[i], BPF_PROG_TYPE_SCHED_CLS);
+		bpf_program__set_expected_attach_type(prog_ingress_[i], BPF_TCX_INGRESS);
+		bpf_program__set_expected_attach_type(prog_egress_[i], BPF_TCX_EGRESS);
+	}
 
 	if (bpf_object__load(obj_) != 0) {
 		if (err)
@@ -108,7 +114,7 @@ bool Bpf::load(const std::string &path, uint32_t max_flows, std::string *err)
 	return true;
 }
 
-bool Bpf::attach(uint32_t ifindex, std::string *err)
+bool Bpf::attach(uint32_t ifindex, bool ethernet, std::string *err)
 {
 	if (ifindex == 0) {
 		if (err)
@@ -120,7 +126,8 @@ bool Bpf::attach(uint32_t ifindex, std::string *err)
 		return true;
 
 	if (!l.in) {
-		l.in = bpf_program__attach_tcx(prog_ingress_, static_cast<int>(ifindex), nullptr);
+		l.in = bpf_program__attach_tcx(prog_ingress_[ethernet], static_cast<int>(ifindex),
+					       nullptr);
 		if (!l.in) {
 			if (err)
 				*err = libbpf_msg("attach_tcx ingress");
@@ -128,7 +135,8 @@ bool Bpf::attach(uint32_t ifindex, std::string *err)
 		}
 	}
 	if (!l.eg) {
-		l.eg = bpf_program__attach_tcx(prog_egress_, static_cast<int>(ifindex), nullptr);
+		l.eg = bpf_program__attach_tcx(prog_egress_[ethernet], static_cast<int>(ifindex),
+					       nullptr);
 		if (!l.eg) {
 			bpf_link__destroy(l.in);
 			l.in = nullptr;
@@ -244,10 +252,17 @@ uint32_t Bpf::map_limit() const
 
 void Bpf::bpf_stats(uint64_t out[4]) const
 {
+	/* PERCPU_ARRAY: one u64 slot per possible CPU, summed here. */
+	const int ncpu = libbpf_num_possible_cpus();
+	std::vector<uint64_t> slots(ncpu > 0 ? static_cast<size_t>(ncpu) : 0);
 	for (uint32_t i = 0; i < 4; i++) {
 		out[i] = 0;
-		if (stats_)
-			bpf_map__lookup_elem(stats_, &i, sizeof(i), &out[i], sizeof(out[i]), 0);
+		if (!stats_ || slots.empty() ||
+		    bpf_map__lookup_elem(stats_, &i, sizeof(i), slots.data(),
+					 slots.size() * sizeof(uint64_t), 0) != 0)
+			continue;
+		for (const uint64_t v : slots)
+			out[i] += v;
 	}
 }
 

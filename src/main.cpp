@@ -196,10 +196,11 @@ int main(int argc, char **argv)
 											ev.ifindex);
 			}
 		} else if (wanted) {
-			if (bpf.attach(ev.ifindex, &err)) {
+			const bool eth = obserwrt::link_is_ethernet(ev.type);
+			if (bpf.attach(ev.ifindex, eth, &err)) {
 				name_by_index[ev.ifindex] = ev.ifname;
-				SLOG(LOG_NOTICE,
-				     "device attached")("ifname", ev.ifname)("ifindex", ev.ifindex);
+				SLOG(LOG_NOTICE, "device attached")("ifname", ev.ifname)(
+				    "ifindex", ev.ifindex)("framing", eth ? "eth" : "l3");
 			} else
 				SLOG(LOG_WARNING, "device attach failed")("ifname",
 									  ev.ifname)("error", err);

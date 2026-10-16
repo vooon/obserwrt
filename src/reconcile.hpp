@@ -20,9 +20,15 @@ namespace obserwrt
 struct LinkEvent {
 	uint32_t ifindex = 0;
 	std::string ifname;
+	uint16_t type = 0;    /* ifi_type (ARPHRD_*) */
 	bool present = false; /* true=NEWLINK, false=DELLINK */
 	bool up = false;      /* IFF_UP (admin up) */
 };
+
+/* Whether TC sees a link-layer (Ethernet) header in front of IP on a device
+ * of this ARPHRD type; false for L3 devices (WireGuard/AWG, ip6gre/FOU, tun,
+ * PPP), whose skb data starts at the IP header. */
+bool link_is_ethernet(uint16_t arphrd);
 
 class Reconcile
 {

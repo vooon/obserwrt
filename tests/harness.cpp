@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <linux/if_arp.h>
 #include <map>
 #include <string>
 #include <vector>
@@ -26,6 +27,7 @@
 #include "flow.hpp"
 #include "lifecycle.hpp"
 #include "prometheus.hpp"
+#include "reconcile.hpp"
 
 typedef obserwrt::FlowKey FK;
 typedef obserwrt::FlowValue FV;
@@ -592,6 +594,19 @@ static void test_prometheus()
 	      s.find("obserwrt_build_info{version"));
 }
 
+/* Framing is chosen per device at attach time: Ethernet-framed link types get
+ * the *_eth programs, everything else (AWG, ip6gre/FOU, tun, PPP) *_l3. */
+static void test_link_framing()
+{
+	CHECK(obserwrt::link_is_ethernet(ARPHRD_ETHER));
+	CHECK(obserwrt::link_is_ethernet(ARPHRD_LOOPBACK));
+	CHECK(!obserwrt::link_is_ethernet(ARPHRD_NONE));
+	CHECK(!obserwrt::link_is_ethernet(ARPHRD_IP6GRE));
+	CHECK(!obserwrt::link_is_ethernet(ARPHRD_IPGRE));
+	CHECK(!obserwrt::link_is_ethernet(ARPHRD_TUNNEL6));
+	CHECK(!obserwrt::link_is_ethernet(ARPHRD_PPP));
+}
+
 int main()
 {
 	test_ipfix_wire();
@@ -600,6 +615,7 @@ int main()
 	test_syslog_export();
 	test_config_mini();
 	test_prometheus();
+	test_link_framing();
 
 	if (g_failures != 0) {
 		std::fprintf(stderr, "harness: %d failures\n", g_failures);
