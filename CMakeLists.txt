@@ -173,7 +173,7 @@ endif()
 if(NOT OBSERWRT_USE_LIBUCI)
   install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/linux/obserwrt.conf DESTINATION /etc)
   install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/linux/obserwrt.service
-    DESTINATION /lib/systemd/system)
+    DESTINATION /usr/lib/systemd/system)
 endif()
 
 # ---------------- tests ----------------
@@ -206,5 +206,11 @@ if(OBSERWRT_ENABLE_CPACK)
     "Vladimir Ermakov <vooon341@gmail.com>")
   set(CPACK_DEBIAN_PACKAGE_DEPENDS "libbpf1 (>= 1.4), libstdc++6 (>= 12)")
   set(CPACK_DEBIAN_PACKAGE_SECTION net)
+  # CPack does not mark /etc files as conffiles on its own (no debhelper):
+  # without this, an upgrade silently overwrites the admin's config.
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/debian/conffiles"
+    "${OBSERWRT_DEFAULT_CONFIG}\n")
+  set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
+    "${CMAKE_CURRENT_BINARY_DIR}/debian/conffiles")
   include(CPack)
 endif()
