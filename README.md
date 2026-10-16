@@ -36,6 +36,10 @@ obserwrt is built for how OpenWrt actually works:
 
 ## Status
 
+- **v0.4.0** — Ethernet observation points (bridges, bonds, VLANs, VXLAN,
+  physical NICs) are framed per device, so plain-Linux/Proxmox hosts are
+  supported alongside the routers; packet/byte counts are GSO-aware L3 octets,
+  correct on 10G/virtio links.
 - **v0.3.2** — the ucode agent was rewritten in C++23 for the CPU/RAM footprint
   on MIPS routers; a real OpenWrt **mesh is live** exporting IPFIX into
   **Akvorado + ClickHouse**.

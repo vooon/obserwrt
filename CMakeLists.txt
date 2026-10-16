@@ -185,6 +185,17 @@ if(OBSERWRT_BUILD_TESTS)
   target_compile_options(obserwrt-harness PRIVATE ${OBSERWRT_CXX_FLAGS})
   add_test(NAME golden-vectors COMMAND obserwrt-harness)
 
+  # eBPF behaviour via BPF_PROG_TEST_RUN; needs CAP_BPF, so it reports
+  # "skipped" (77) when run unprivileged. CI runs it under sudo.
+  if(TARGET obserwrt_bpf_o)
+    add_executable(obserwrt-bpf-run tests/bpf_run.cpp)
+    target_link_libraries(obserwrt-bpf-run PRIVATE obserwrt_core)
+    target_compile_options(obserwrt-bpf-run PRIVATE ${OBSERWRT_CXX_FLAGS})
+    add_dependencies(obserwrt-bpf-run obserwrt_bpf_o)
+    add_test(NAME bpf-test-run COMMAND obserwrt-bpf-run ${BPF_OBJECT})
+    set_tests_properties(bpf-test-run PROPERTIES SKIP_RETURN_CODE 77)
+  endif()
+
   # goflow2 e2e emitter: drives the native IpfixExporter to a collector.
   add_executable(obserwrt-emit tests/emit_native.cpp)
   target_link_libraries(obserwrt-emit PRIVATE obserwrt_core)

@@ -84,7 +84,7 @@ Source map (see design §11 for the full feed layout):
 | `src/log.hpp` / `src/version.hpp` | DAEMON_LOG, build_info |
 | `bpf/obserwrt-bpf.c` / `bpf/obserwrt-flow.h` | eBPF program + shared §5 header |
 | `vendor/`, `linux/`, `obserwrt/files/` | headers, systemd unit/.conf, procd scripts |
-| `tests/`, `scripts/` | golden harness + goflow2 e2e emitter |
+| `tests/`, `scripts/` | golden harness, eBPF test-run, goflow2 e2e emitter |
 
 ## Commands
 
@@ -134,6 +134,10 @@ build/obserwrt -c linux/obserwrt.conf
   bytes (templates 256/257 incl. IE 152/153), the §5 key/value layouts, the
   lifecycle delta/expiry contract, syslog JSON/logfmt/envelopes, the Prometheus
   exposition, and both config backends.
+- **eBPF test-run** (`tests/bpf_run.cpp`, `ctest`, needs root; skipped
+  unprivileged): loads the real object and runs crafted frames through it via
+  `BPF_PROG_TEST_RUN` — framing, GSO/L3-octet counts, VLAN, IPv6 HBH, per-CPU
+  stats. Run: `sudo build/obserwrt-bpf-run build/obserwrt-bpf.o`
 
 ## Conventions
 
