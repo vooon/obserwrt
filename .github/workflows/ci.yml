@@ -82,6 +82,14 @@ jobs:
           set -euo pipefail
           ctest --test-dir build --output-on-failure
 
+      - name: eBPF test-run (BPF_PROG_TEST_RUN, needs root)
+        # Runs crafted frames through the real eBPF programs (no attach) and
+        # checks the flow map + per-CPU stats; skipped by the unprivileged
+        # ctest above.
+        run: |
+          set -euo pipefail
+          sudo ./build/obserwrt-bpf-run build/obserwrt-bpf.o
+
       - name: clang-format check (our sources, not the vendored inifile)
         # Pinned: clang-format versions disagree on wrapping the SLOG(...)(...)
         # chains, so CI and local use the same PyPI wheel (see AGENTS.md).

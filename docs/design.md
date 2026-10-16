@@ -654,3 +654,16 @@ unchanged. The whole mesh is trustworthy end-to-end:
 Remaining L2/fabric work (bridge/bond `vlan_id`/`src_mac` enrichment and its
 key vs value decision; VXLAN-over-OSPF inner-flow decap) is carried as future
 probes (§15), not v0.3 scope.
+
+### v0.4 — met (Ethernet hosts, counter correctness)
+
+Observation extends from router tunnels to Ethernet-heavy Linux hosts (Proxmox
+nodes: bonds, bridges, VXLAN, 10G fabric ports):
+
+| area | delivered |
+|------|-----------|
+| Framing | per-device `_eth`/`_l3` program pairs chosen from the rtnetlink link type (§4); no first-byte guessing |
+| Parser | IPv6 extension-header lengths per RFC 8200/4302 (Hop-by-Hop, e.g. MLD, no longer dropped) |
+| Counters | GSO-aware packets, L3-octet bytes (§7); `obserwrt_stats` per-CPU, no shared atomics (§9) |
+| Packaging | `.deb` marks `/etc/obserwrt.conf` as a conffile; systemd unit under `/usr/lib` |
+| Verification | `BPF_PROG_TEST_RUN` test (`tests/bpf_run.cpp`) in CI: 4x: dst MAC, GSO, 802.1Q, IPv6 HBH, ARP, per-CPU sums |
