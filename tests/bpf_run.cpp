@@ -54,7 +54,7 @@ int run(const Ctx &c, std::vector<uint8_t> &pkt, uint32_t gso_segs)
 	struct __sk_buff skb;
 	std::memset(&skb, 0, sizeof(skb));
 	skb.gso_segs = gso_segs;
-	skb.gso_size = gso_segs > 1 ? 1000 : 0;
+	skb.gso_size = gso_segs > 1 ? 300 : 0;
 	LIBBPF_OPTS(bpf_test_run_opts, o, .data_in = pkt.data(),
 		    .data_size_in = static_cast<uint32_t>(pkt.size()), .ctx_in = &skb,
 		    .ctx_size_in = sizeof(skb), .repeat = 1);
@@ -115,7 +115,8 @@ bool lookup(const Ctx &c, const flow_key &k, flow_val &v)
 
 /* Frame to a 4x: destination MAC: the first byte must not be taken for an IP
  * version nibble. TCP as a 10-segment GSO super-packet: 10 packets, and L3
- * octets with the 40-byte IPv4+TCP headers re-added for segments 2..10. */
+ * octets with the 40-byte IPv4+TCP headers re-added for segments 2..10.
+ * Kept under a page: older kernels reject larger test-run packets (EINVAL). */
 void test_eth_tcp_gso(const Ctx &c)
 {
 	const uint8_t dmac[6] = {0x46, 0x11, 0x22, 0x33, 0x44, 0x55};
@@ -126,7 +127,7 @@ void test_eth_tcp_gso(const Ctx &c)
 	tcp[12] = 5 << 4;
 	tcp[13] = 0x18; /* PSH|ACK */
 	p.insert(p.end(), tcp, tcp + 20);
-	p.resize(p.size() + 10000);
+	p.resize(p.size() + 3000);
 	run(c, p, 10);
 
 	flow_val v;
@@ -136,7 +137,7 @@ void test_eth_tcp_gso(const Ctx &c)
 		return;
 	}
 	CHECK_EQ(v.packets, 10);
-	CHECK_EQ(v.bytes, 10040 + 9 * 40);
+	CHECK_EQ(v.bytes, 3040 + 9 * 40);
 	CHECK_EQ(v.tcp_flags, 0x18);
 }
 
