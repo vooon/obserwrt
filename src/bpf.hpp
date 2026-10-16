@@ -43,9 +43,10 @@ class Bpf
 		return obj_ != nullptr;
 	}
 
-	/* TC ingress+egress attach on a device incarnation (real ifindex).
-	 * Idempotent; keeps the tcx links until detach(). */
-	bool attach(uint32_t ifindex, std::string *err);
+	/* TC ingress+egress attach on a device incarnation (real ifindex), with
+	 * the Ethernet or L3 program pair (see link_is_ethernet()). Idempotent;
+	 * keeps the tcx links until detach(). */
+	bool attach(uint32_t ifindex, bool ethernet, std::string *err);
 	void detach(uint32_t ifindex);
 	bool attached(uint32_t ifindex) const;
 
@@ -74,8 +75,9 @@ class Bpf
 	bpf_object *obj_ = nullptr;
 	bpf_map *flows_ = nullptr;
 	bpf_map *stats_ = nullptr;
-	bpf_program *prog_ingress_ = nullptr;
-	bpf_program *prog_egress_ = nullptr;
+	/* [0] = L3 framing, [1] = Ethernet framing */
+	bpf_program *prog_ingress_[2] = {};
+	bpf_program *prog_egress_[2] = {};
 	std::map<uint32_t, Links> atts_; /* ifindex -> live tcx links */
 	std::string last_error_;
 };

@@ -123,8 +123,18 @@ to find L3, not dropped), but a future option could add `vlanId` to the key or
 value to disambiguate. L2 MACs / VLAN id are currently only enrichment
 candidates, not identity.
 
+**Framing** is a property of the device, not of the packet. The object carries
+two program pairs, `obserwrt_{ingress,egress}_eth` and `_l3`, and the agent
+picks one per device at attach time from the rtnetlink link type (`ifi_type`):
+`ARPHRD_ETHER`/`ARPHRD_LOOPBACK` (eth, bridge, bond, VLAN, VXLAN, veth/tap,
+gretap) get the Ethernet pair; everything else (AWG/WireGuard, ip6gre/FOU, tun,
+PPP) gets the L3 pair, whose skb data starts at the IP header. Guessing from the
+first packet byte is not an option: on Ethernet that byte is the destination
+MAC, and every MAC starting with `0x4_`/`0x6_` would read as an IP header.
+
 **Packet parsing** (in `obserwrt-bpf.c`): IPv6 walks up to 8 extension headers
-(Hop-by-Hop, Routing, Destination Options, AH, Fragment); the IPv4 path
+(Hop-by-Hop, Routing, Destination Options, AH, Fragment; `Hdr Ext Len` per
+RFC 8200 §4.3, AH per RFC 4302 §2.2); the IPv4 path
 validates IHL ≥ 20. Non-first fragments (IPv4 offset ≠ 0, or an IPv6 Fragment
 header with non-zero offset) carry no transport header, so they are accounted
 as **IP-only** flows (`sport/dport/icmp = 0`, `proto` kept) — note this is a
@@ -242,8 +252,14 @@ was created (AWG/WireGuard, WAN, bridge, TUN, VXLAN, physical Ethernet).
 
 ## 7. Flow lifecycle
 
-Packet: `lookup(key)` → `create/update` → `packets++`, `bytes += len`,
+Packet: `lookup(key)` → `create/update` → `packets += segs`, `bytes += l3len`,
 `last_seen = now`, accumulate `tcp_flags`. Userspace periodically reads the map.
+
+Counting is GSO-aware: a GRO/TSO super-packet (routine on 10G NICs, virtio,
+veth) counts as `skb->gso_segs` packets. `bytes` are **L3 octets** (IP header +
+payload, the IPFIX `octetDeltaCount` definition): the link-layer header is not
+counted, and for a super-packet the per-segment L3(+ext)/TCP/UDP headers are
+re-added for each segment beyond the first.
 
 Each pass hands the exporter the **delta** since the last export (the C++
 `Lifecycle` tracks last-exported counters per flow key), so active flows
@@ -368,10 +384,12 @@ Example JSON payload:
 Individual flows are **never** placed into Prometheus labels. Metrics come from
 two sources, split honestly between BPF truth and userspace:
 
-- **counters, BPF truth** (`obserwrt_stats` map, incremented in-kernel, exact
-  even under LRU eviction):
-  `obserwrt_packets_total` / `obserwrt_bytes_total` (everything the TC filter
-  saw, including non-IP like ARP), `obserwrt_packets_accounted_total` (the
+- **counters, BPF truth** (`obserwrt_stats` `PERCPU_ARRAY`, incremented
+  in-kernel without shared atomics and summed by the agent, exact even under
+  LRU eviction):
+  `obserwrt_packets_total` (GSO segments) / `obserwrt_bytes_total` (`skb->len`,
+  including the link layer) — everything the TC filter saw, including non-IP
+  like ARP, `obserwrt_packets_accounted_total` (the
   subset that entered flow accounting — all IP, incl. non-first fragments and
   non-TCP/UDP/ICMP protocols), `obserwrt_flows_created_total` (new flow inserts).
   The `accounted/seen` ratio hence shows how much non-IP/unsupported traffic the

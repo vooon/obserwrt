@@ -2,14 +2,15 @@
  * obserwrt - device reconciliation via rtnetlink (reconcile.cpp)
  *
  * NETLINK_ROUTE, RTMGRP_LINK: RTM_GETLINK dump at startup, then live
- * RTM_NEWLINK/RTM_DELLINK. Only the IFLA_IFNAME + ifi_index/ifi_flags are
- * read; netifd's notion of "active/present" reduces to IFF_UP here (see the
+ * RTM_NEWLINK/RTM_DELLINK. Only the IFLA_IFNAME + ifi_index/ifi_type/ifi_flags
+ * are read; netifd's notion of "active/present" reduces to IFF_UP here (see the
  * header comment in reconcile.hpp).
  */
 
 #include "reconcile.hpp"
 
 #include <linux/if.h>
+#include <linux/if_arp.h>
 #include <linux/if_link.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
@@ -33,6 +34,7 @@ void parse_link(const struct nlmsghdr *nlh, LinkEvent &ev)
 {
 	const struct ifinfomsg *ifi = (const struct ifinfomsg *)NLMSG_DATA(nlh);
 	ev.ifindex = static_cast<uint32_t>(ifi->ifi_index);
+	ev.type = ifi->ifi_type;
 	ev.up = (ifi->ifi_flags & IFF_UP) != 0;
 	ev.present = (nlh->nlmsg_type == RTM_NEWLINK);
 
@@ -48,6 +50,13 @@ void parse_link(const struct nlmsghdr *nlh, LinkEvent &ev)
 }
 
 } /* namespace */
+
+bool link_is_ethernet(uint16_t arphrd)
+{
+	/* Bridges, bonds, VLANs, VXLAN, veth/tap and gretap are all ARPHRD_ETHER;
+	 * loopback also carries a (zeroed) Ethernet header. */
+	return arphrd == ARPHRD_ETHER || arphrd == ARPHRD_LOOPBACK;
+}
 
 Reconcile::~Reconcile()
 {

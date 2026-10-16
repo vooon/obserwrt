@@ -7,15 +7,23 @@
  * Program type is BPF_PROG_TYPE_SCHED_CLS (forced via ucode program-type; libbpf
  * 1.6 no longer infers it from "classifier/<sub>").
  *
- * Framing:
- *   - L3 devices (WireGuard/AmneziaWG tun, ARPHRD_NONE) hand the skb to TC with
- *     `data` pointing directly at the IP header (no link layer). Detected by the
- *     IP version nibble at data[0].
- *   - Ethernet devices have a 14-byte link-layer header; the L3 offset is found
- *     by parsing the EtherType, walking one or two 802.1Q/802.1ad VLAN tags.
+ * Framing is a property of the device, not of the packet, so each direction
+ * has two programs and the agent picks the pair by the link type (ARPHRD) at
+ * attach time:
+ *   - *_l3: L3 devices (WireGuard/AmneziaWG, ip6gre/FOU, tun, PPP) hand the skb
+ *     to TC with `data` pointing directly at the IP header (no link layer).
+ *   - *_eth: Ethernet devices have a 14-byte link-layer header; the L3 offset
+ *     is found by parsing the EtherType, walking one or two 802.1Q/802.1ad
+ *     VLAN tags. (Guessing from the first byte would misread every frame whose
+ *     destination MAC starts with 0x4_/0x6_ as an IP header.)
  *
- * A per-cpu-free ARRAY map `obserwrt_stats` tracks aggregate packets/bytes/flow
- * creations exactly (independent of LRU eviction) for Prometheus counters.
+ * Counts are GSO-aware: a GRO/TSO super-packet counts as gso_segs packets, and
+ * flow bytes are L3 octets (IP header + payload, as IPFIX octetDeltaCount),
+ * with the L3/L4 headers re-added for every segment beyond the first.
+ *
+ * A PERCPU_ARRAY map `obserwrt_stats` tracks aggregate packets/bytes/flow
+ * creations exactly (independent of LRU eviction) for Prometheus counters;
+ * per-CPU slots keep the hot path free of shared atomics (the agent sums).
  *
  * The map uses the final flow-key/value layouts (see docs/design.md §5); IPv4
  * addresses are stored as IPv4-mapped IPv6 ::ffff:a.b.c.d in the 16-byte fields.
@@ -66,7 +74,7 @@ struct {
 } obserwrt_flows SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
 	__uint(max_entries, STAT_MAX);
 	__type(key, __u32);
 	__type(value, __u64);
@@ -80,7 +88,7 @@ stat_add(__u32 idx, __u64 n)
 	__u64 *c = bpf_map_lookup_elem(&obserwrt_stats, &idx);
 
 	if (c)
-		__sync_fetch_and_add(c, n);
+		*c += n;   /* per-CPU slot: no atomic needed */
 }
 
 /* Store a 4-byte IPv4 address as IPv4-mapped IPv6 (::ffff:a.b.c.d). */
@@ -92,11 +100,12 @@ ip4_to_in6(__u8 out[16], const __u8 *ip)
 	__builtin_memcpy(out + 12, ip, 4);
 }
 
-/* Advance `l4` across an IPv6 extension header. Returns the new next-header
- * value, or 0 on bound fault. `hdrlen` is the header's `len` field (for the
- * fixed-size fragment header this is ignored/excluded). */
+/* Advance `l4` across an IPv6 extension header (not Fragment, which is fixed
+ * size and handled by the caller). Returns the new next-header value, or 0 on
+ * bound fault. Hdr Ext Len counts 8-octet units beyond the first 8 (RFC 8200
+ * §4.3), except AH, which counts 4-octet units minus 2 (RFC 4302 §2.2). */
 static inline __u8
-ext_next(__u8 *data_end, __u8 **l4)
+ext_next(__u8 *data_end, __u8 **l4, int ah)
 {
 	__u8 *p = *l4;
 	__u8 nh, len;
@@ -107,7 +116,10 @@ ext_next(__u8 *data_end, __u8 **l4)
 
 	nh = p[0];
 	len = p[1];
-	hlen = 8 + ((__u32)(len + 1) << 3);   /* length field excludes the first 8 */
+	if (ah)
+		hlen = ((__u32)len + 2) << 2;
+	else
+		hlen = ((__u32)len + 1) << 3;
 	*l4 = p + hlen;
 
 	if (*l4 > data_end)
@@ -118,10 +130,11 @@ ext_next(__u8 *data_end, __u8 **l4)
 
 /*
  * Observe a packet seen at `direction` on the device the TC filter is attached
- * to. Aggregates into obserwrt_flows and returns TC_ACT_OK (pass).
+ * to. `eth` (a compile-time constant per program) selects the framing.
+ * Aggregates into obserwrt_flows and returns TC_ACT_OK (pass).
  */
-static int
-observe(struct __sk_buff *skb, __u8 direction)
+static __always_inline int
+observe(struct __sk_buff *skb, __u8 direction, const int eth)
 {
 	__u8 *data = (__u8 *)(__u64)skb->data;
 	__u8 *data_end = (__u8 *)(__u64)skb->data_end;
@@ -131,17 +144,23 @@ observe(struct __sk_buff *skb, __u8 direction)
 	__u16 sport = 0, dport = 0;
 	__u32 ihl = 0;
 	__u32 frag_off = 0;   /* !=0 means a non-first fragment: no L4 */
+	__u32 l4hdr = 0;      /* L4 header bytes repeated in every GSO segment */
+	__u32 segs, l3len;
 	int have_l4 = 0;
 
-	stat_add(STAT_PACKETS, 1);
+	/* A GRO/TSO super-packet stands for gso_segs wire packets. */
+	segs = skb->gso_segs;
+	if (segs == 0)
+		segs = 1;
+
+	stat_add(STAT_PACKETS, segs);
 	stat_add(STAT_BYTES, skb->len);
 
 	if (data + 2 > data_end)
 		return TC_ACT_OK;
 
-	/* Framing detection. */
-	if ((data[0] >> 4) == 4 || (data[0] >> 4) == 6) {
-		ip = data;                 /* L3 device (tun/awg) */
+	if (!eth) {
+		ip = data;                 /* L3 device (awg/gre/tun) */
 	} else {
 		/* Ethernet: parse EtherType, walk one or two VLAN tags. */
 		__u8 *p = data;
@@ -209,12 +228,11 @@ observe(struct __sk_buff *skb, __u8 direction)
 		 * Fragment / AH). Fragment: non-first has no L4. */
 		for (iter = 0; iter < MAX_EXT_HDR; iter++) {
 			if (proto == 0 || proto == 43 || proto == 60 || proto == 51) {
-				proto = ext_next(data_end, &l4);
+				proto = ext_next(data_end, &l4, proto == 51);
 				if (proto == 0)
 					return TC_ACT_OK;
 			} else if (proto == 44) {      /* fragment header */
 				__u8 *fh = l4;
-				__u16 fi;
 
 				if (fh + 8 > data_end)
 					return TC_ACT_OK;
@@ -246,11 +264,13 @@ observe(struct __sk_buff *skb, __u8 direction)
 			sport = bpf_ntohs(*(__u16 *)l4);
 			dport = bpf_ntohs(*(__u16 *)(l4 + 2));
 			tcpf = *(l4 + 13);
+			l4hdr = (__u32)(*(l4 + 12) >> 4) << 2;
 		} else if (proto == 17) {               /* UDP */
 			if (l4 + 4 > data_end)
 				return TC_ACT_OK;
 			sport = bpf_ntohs(*(__u16 *)l4);
 			dport = bpf_ntohs(*(__u16 *)(l4 + 2));
+			l4hdr = 8;
 		} else if (proto == 1 || proto == 58) { /* ICMP/ICMPv6 */
 			if (l4 + 2 > data_end)
 				return TC_ACT_OK;
@@ -261,7 +281,13 @@ observe(struct __sk_buff *skb, __u8 direction)
 	}
 
 	/* Reached the flow accounting path: count as "parsed/accounted". */
-	stat_add(STAT_PARSED, 1);
+	stat_add(STAT_PARSED, segs);
+
+	/* L3 octets: drop the link-layer header, then add back the per-segment
+	 * L3(+ext)/L4 headers the GSO super-packet carries only once. */
+	l3len = skb->len - (__u32)(ip - data);
+	if (segs > 1)
+		l3len += (segs - 1) * ((__u32)(l4 - ip) + l4hdr);
 
 	struct flow_key key = { 0 };
 
@@ -286,16 +312,16 @@ observe(struct __sk_buff *skb, __u8 direction)
 	struct flow_val *val = bpf_map_lookup_elem(&obserwrt_flows, &key);
 
 	if (val) {
-		__sync_fetch_and_add(&val->packets, 1);
-		__sync_fetch_and_add(&val->bytes, skb->len);
+		__sync_fetch_and_add(&val->packets, segs);
+		__sync_fetch_and_add(&val->bytes, l3len);
 		val->tcp_flags |= tcpf;   /* union of observed flags */
 		val->last_seen = bpf_ktime_get_ns();
 	} else {
 		struct flow_val nv = { 0 };
 		__u64 now = bpf_ktime_get_ns();
 
-		nv.packets = 1;
-		nv.bytes = skb->len;
+		nv.packets = segs;
+		nv.bytes = l3len;
 		nv.first_seen = now;
 		nv.last_seen = now;
 		nv.tcp_flags = tcpf;
@@ -307,15 +333,27 @@ observe(struct __sk_buff *skb, __u8 direction)
 }
 
 SEC("classifier/ingress")
-int obserwrt_ingress(struct __sk_buff *skb)
+int obserwrt_ingress_eth(struct __sk_buff *skb)
 {
-	return observe(skb, OBSERWRT_INGRESS);
+	return observe(skb, OBSERWRT_INGRESS, 1);
 }
 
 SEC("classifier/egress")
-int obserwrt_egress(struct __sk_buff *skb)
+int obserwrt_egress_eth(struct __sk_buff *skb)
 {
-	return observe(skb, OBSERWRT_EGRESS);
+	return observe(skb, OBSERWRT_EGRESS, 1);
+}
+
+SEC("classifier/ingress")
+int obserwrt_ingress_l3(struct __sk_buff *skb)
+{
+	return observe(skb, OBSERWRT_INGRESS, 0);
+}
+
+SEC("classifier/egress")
+int obserwrt_egress_l3(struct __sk_buff *skb)
+{
+	return observe(skb, OBSERWRT_EGRESS, 0);
 }
 
 char LICENSE[] SEC("license") = "Apache-2.0";
