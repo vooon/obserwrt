@@ -648,7 +648,7 @@ static void test_config_mini()
 				 "device = awg* br-lan\n"
 				 "tcp_timeout = 300\n"
 				 "max_flows = 8192\n"
-				 "enable_drops = yes\n"
+				 "track_drops = yes\n"
 				 "[ipfix]\n"
 				 "enabled = true\n"
 				 "collector_host = 192.0.2.10\n"
@@ -663,8 +663,8 @@ static void test_config_mini()
 	CHECK(c.devices[1] == "br-lan");
 	CHECK_EQ(c.timeouts.tcp, (uint64_t)300);
 	CHECK_EQ(c.max_flows, (uint32_t)8192);
-	CHECK(c.enable_drops);
-	CHECK(!obserwrt::load_config_string("[main]\n", &err).enable_drops); /* default off */
+	CHECK(c.track_drops);
+	CHECK(!obserwrt::load_config_string("[main]\n", &err).track_drops); /* default off */
 	CHECK(c.ipfix.enabled);
 	CHECK(c.ipfix.collector_host == "192.0.2.10");
 	CHECK_EQ(c.ipfix.collector_port, (uint16_t)4739);

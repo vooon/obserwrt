@@ -51,13 +51,13 @@ Bpf::~Bpf()
 		bpf_object__close(obj_);
 }
 
-bool Bpf::load(const std::string &path, uint32_t max_flows, bool enable_drops, std::string *err,
+bool Bpf::load(const std::string &path, uint32_t max_flows, bool track_drops, std::string *err,
 	       std::string *warn)
 {
 	if (warn)
 		warn->clear();
-	if (!open_load(path, max_flows, enable_drops, err)) {
-		if (!enable_drops)
+	if (!open_load(path, max_flows, track_drops, err)) {
+		if (!track_drops)
 			return false;
 		/* The drop tracer is optional: never let it take flow collection
 		 * down (e.g. a kernel without BTF for tp_btf). Retry without it. */
@@ -68,7 +68,7 @@ bool Bpf::load(const std::string &path, uint32_t max_flows, bool enable_drops, s
 			return false;
 		return true;
 	}
-	if (!enable_drops)
+	if (!track_drops)
 		return true;
 
 	drop_link_ = bpf_program__attach(prog_drop_);

@@ -298,9 +298,9 @@ and deleted from the map (timeouts configurable, see §10):
 
 Correctness and bounded memory outrank sophisticated expiry.
 
-### 7.1 Drops (`enable_drops`)
+### 7.1 Drops (`track_drops`)
 
-With `main.enable_drops` on, a `tp_btf/kfree_skb` program records packets the
+With `main.track_drops` on, a `tp_btf/kfree_skb` program records packets the
 kernel **drops** (normal frees go through `consume_skb` and are not seen) whose
 skb device is an attached observation point (the agent mirrors attached
 ifindexes into `obserwrt_attached`). Off by default: a WAN under a port scan
@@ -533,7 +533,7 @@ need for differing per-device behavior exists.
 
 The per-protocol idle timeouts (`tcp_timeout`/`udp_timeout`/`icmp_timeout`/
 `general_timeout`), the flow-map capacity (`max_flows`, 0 = the baked
-4096-entry default) and drop tracking (`enable_drops`, §7.1, default off) live in
+4096-entry default) and drop tracking (`track_drops`, §7.1, default off) live in
 the `main` section; the per-router IPFIX
 `observation_domain` lives in the exporter section, so each router can carve
 out its own domain for multi-collector deployments.
@@ -551,7 +551,7 @@ config obserwrt 'main'
     option icmp_timeout '30'
     option general_timeout '10'
     # option max_flows '4096'      # LRU flow-map capacity; 0 = baked-in default
-    # option enable_drops '1'      # record kernel drops (§7.1); default off
+    # option track_drops '1'       # record kernel drops (§7.1); default off
     # option log_level 'debug'     # error|warning|notice|info|debug
     # option prometheus_textfile '/run/prometheus/textfile/obserwrt.prom'  # unset = disabled
     option prometheus_interval '20'
@@ -583,7 +583,7 @@ udp_timeout = 60
 icmp_timeout = 30
 general_timeout = 10
 # max_flows = 4096        # LRU flow-map capacity; 0 = baked-in default
-# enable_drops = false    # record kernel drops (§7.1)
+# track_drops = false     # record kernel drops (§7.1)
 # log_level = notice      # error, warning, notice, info, debug
 # prometheus_textfile = /run/prometheus/textfile/obserwrt.prom
 prometheus_interval = 20
@@ -794,4 +794,4 @@ Fixes found by checking the live data in Akvorado:
 | VLAN, DSCP | outer VID and first-packet TOS as flow-value enrichment (§4, §5.2), also in the syslog record (`vlan_id`, `dscp`) |
 | Map walk | batched `BPF_MAP_LOOKUP_BATCH` read of keys + values; no restart under LRU churn, one syscall per batch instead of two per flow |
 | Device counters | `obserwrt_device_{packets,bytes}_total{ifname,direction,class}` (ipv4/ipv6/arp/other), §9 |
-| Drops | optional `tp_btf/kfree_skb` tracer (`enable_drops`), drop records with `forwardingStatus` 128+ (IE 89), reason names from kernel BTF; eBPF program relicensed GPL-2.0-only (§7.1) |
+| Drops | optional `tp_btf/kfree_skb` tracer (`track_drops`), drop records with `forwardingStatus` 128+ (IE 89), reason names from kernel BTF; eBPF program relicensed GPL-2.0-only (§7.1) |
