@@ -405,8 +405,9 @@ static void test_key_value_layouts()
 	CHECK_EQ(vp[35], (uint8_t)0x00);
 	CHECK_EQ(vp[36], (uint8_t)0x00); /* tos */
 	for (int i = 37; i < 40; i++)
-		CHECK_EQ(vp[i], (uint8_t)0x00); /* trailing pad */
+		CHECK_EQ(vp[i], (uint8_t)0x00); /* reserved */
 	CHECK_EQ(offsetof(struct flow_val, tos), (size_t)36);
+	CHECK_EQ(offsetof(struct flow_val, reserved), (size_t)37);
 
 	FV vt{};
 	vt.vlan_id = 0x0123;
