@@ -161,7 +161,7 @@ void fill(struct uci_context *ctx, const std::string &target, Config &cfg, std::
 			uint64_t flows = 0;
 			if (parse_uint(ctx, s, "max_flows", 0, 1ULL << 30, "max_flows", flows, err))
 				cfg.max_flows = static_cast<uint32_t>(flows);
-			cfg.track_drops = bool_option(option(ctx, s, "track_drops"), false);
+			cfg.enable_drops = bool_option(option(ctx, s, "enable_drops"), false);
 			const char *ll = option(ctx, s, "log_level");
 			cfg.log_level = log_level_from_string(ll ? ll : "", LOG_NOTICE);
 			const char *tf = option(ctx, s, "prometheus_textfile");

@@ -8,7 +8,7 @@
  * successful READY state").
  *
  * Format (see linux/obserwrt.conf), mirroring the UCI option set:
- *   [main]   device = <space-separated globs>, *_timeout, max_flows, track_drops,
+ *   [main]   device = <space-separated globs>, *_timeout, max_flows, enable_drops,
  *            prometheus_textfile, prometheus_interval
  *   [ipfix]  enabled, collector_host, collector_port, observation_domain,
  *            source_address
@@ -97,7 +97,7 @@ Config parse(ini::IniFile &ini)
 	    parse_uint(ini, "main", "general_timeout", 10, 86400, "general_timeout");
 	cfg.max_flows =
 	    static_cast<uint32_t>(parse_uint(ini, "main", "max_flows", 0, 1ULL << 30, "max_flows"));
-	cfg.track_drops = parse_bool(ini, "main", "track_drops", false);
+	cfg.enable_drops = parse_bool(ini, "main", "enable_drops", false);
 	cfg.log_level = log_level_from_string(field(ini, "main", "log_level"), LOG_NOTICE);
 	cfg.prometheus_textfile = std::string(field(ini, "main", "prometheus_textfile"));
 	cfg.prometheus_interval = static_cast<uint32_t>(

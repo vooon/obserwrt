@@ -187,6 +187,7 @@ static void test_ipfix_wire()
 	v1.last_seen = 1700006000000000000ULL;
 	v1.tcp_flags = 0x18;
 	v1.vlan_id = 100;
+	v1.tos = 0xb8; /* DSCP 46 (EF), ECN 0 */
 
 	/* IPv6 UDP ingress, ifindex 30, 2001:db8::1 -> 2001:db8::2 */
 	uint8_t s1[16] = {0};
@@ -235,20 +236,20 @@ static void test_ipfix_wire()
 	const auto &d = e.captured();
 	CHECK_EQ(d.size(), (size_t)3);
 
-	/* [0] templates: len 176, version 10, exportTime, seq 0, domain 1. */
+	/* [0] templates: len 184, version 10, exportTime, seq 0, domain 1. */
 	const auto &t = d[0];
-	CHECK_EQ(t.size(), (size_t)176);
+	CHECK_EQ(t.size(), (size_t)184);
 	CHECK_EQ(r16(t, 0), (uint16_t)10);
-	CHECK_EQ(r16(t, 2), (uint16_t)176);
+	CHECK_EQ(r16(t, 2), (uint16_t)184);
 	CHECK_EQ(r32(t, 4), (uint32_t)1615382640);
 	CHECK_EQ(r32(t, 8), (uint32_t)0);
 	CHECK_EQ(r32(t, 12), (uint32_t)1);
 
-	/* set 1: TemplateSet(2) with v4 template tid 256, 18 fields, first (8,4). */
+	/* set 1: TemplateSet(2) with v4 template tid 256, 19 fields, first (8,4). */
 	CHECK_EQ(r16(t, 16), (uint16_t)2);
-	CHECK_EQ(r16(t, 18), (uint16_t)80);
+	CHECK_EQ(r16(t, 18), (uint16_t)84);
 	CHECK_EQ(r16(t, 20), (uint16_t)256);
-	CHECK_EQ(r16(t, 22), (uint16_t)18);
+	CHECK_EQ(r16(t, 22), (uint16_t)19);
 	CHECK_EQ(r16(t, 24), (uint16_t)8);
 	CHECK_EQ(r16(t, 26), (uint16_t)4);
 	/* IE 7/8 are flowStart/EndMilliseconds (152/153), not Seconds (150/151). */
@@ -266,28 +267,31 @@ static void test_ipfix_wire()
 	CHECK_EQ(r16(t, 86), (uint16_t)4);
 	CHECK_EQ(r16(t, 88), (uint16_t)58); /* vlanId */
 	CHECK_EQ(r16(t, 90), (uint16_t)2);
-	CHECK_EQ(r16(t, 92), (uint16_t)89); /* last field: forwardingStatus */
+	CHECK_EQ(r16(t, 92), (uint16_t)89); /* forwardingStatus */
 	CHECK_EQ(r16(t, 94), (uint16_t)1);
+	CHECK_EQ(r16(t, 96), (uint16_t)5); /* last field: ipClassOfService */
+	CHECK_EQ(r16(t, 98), (uint16_t)1);
 
-	/* set 2: v6 template tid 257: set hdr @96, template hdr @100, fields @104. */
-	CHECK_EQ(r16(t, 96), (uint16_t)2);
-	CHECK_EQ(r16(t, 98), (uint16_t)80);
-	CHECK_EQ(r16(t, 100), (uint16_t)257);
-	CHECK_EQ(r16(t, 102), (uint16_t)18);
-	CHECK_EQ(r16(t, 104), (uint16_t)27); /* sourceIPv6Address */
-	CHECK_EQ(r16(t, 106), (uint16_t)16);
-	CHECK_EQ(r16(t, 132), (uint16_t)152); /* flowStartMilliseconds */
-	CHECK_EQ(r16(t, 136), (uint16_t)153); /* flowEndMilliseconds */
-	CHECK_EQ(r16(t, 152), (uint16_t)139); /* icmpTypeCodeIPv6 */
-	CHECK_EQ(r16(t, 168), (uint16_t)58);  /* vlanId */
-	CHECK_EQ(r16(t, 172), (uint16_t)89);  /* forwardingStatus */
+	/* set 2: v6 template tid 257: set hdr @100, template hdr @104, fields @108. */
+	CHECK_EQ(r16(t, 100), (uint16_t)2);
+	CHECK_EQ(r16(t, 102), (uint16_t)84);
+	CHECK_EQ(r16(t, 104), (uint16_t)257);
+	CHECK_EQ(r16(t, 106), (uint16_t)19);
+	CHECK_EQ(r16(t, 108), (uint16_t)27); /* sourceIPv6Address */
+	CHECK_EQ(r16(t, 110), (uint16_t)16);
+	CHECK_EQ(r16(t, 136), (uint16_t)152); /* flowStartMilliseconds */
+	CHECK_EQ(r16(t, 140), (uint16_t)153); /* flowEndMilliseconds */
+	CHECK_EQ(r16(t, 156), (uint16_t)139); /* icmpTypeCodeIPv6 */
+	CHECK_EQ(r16(t, 172), (uint16_t)58);  /* vlanId */
+	CHECK_EQ(r16(t, 176), (uint16_t)89);  /* forwardingStatus */
+	CHECK_EQ(r16(t, 180), (uint16_t)5);   /* ipClassOfService */
 
-	/* [1] v4 data record: len 86, seq 0. */
+	/* [1] v4 data record: len 87, seq 0. */
 	const auto &v4 = d[1];
-	CHECK_EQ(v4.size(), (size_t)86);
+	CHECK_EQ(v4.size(), (size_t)87);
 	CHECK_EQ(r32(v4, 8), (uint32_t)0);	     /* seq */
 	CHECK_EQ(r16(v4, 16), (uint16_t)256);	     /* data set id */
-	CHECK_EQ(r16(v4, 18), (uint16_t)70);	     /* set length 4+66 */
+	CHECK_EQ(r16(v4, 18), (uint16_t)71);	     /* set length 4+67 */
 	CHECK_EQ(r32(v4, 20), (uint32_t)0xc0000201); /* 192.0.2.1 */
 	CHECK_EQ(r32(v4, 24), (uint32_t)0xc6336402); /* 198.51.100.2 */
 	CHECK_EQ(r16(v4, 28), (uint16_t)12345);
@@ -306,13 +310,14 @@ static void test_ipfix_wire()
 	CHECK_EQ(r32(v4, 79), (uint32_t)1);    /* samplingInterval */
 	CHECK_EQ(r16(v4, 83), (uint16_t)100);  /* vlanId */
 	CHECK_EQ(u8(v4, 85), (uint8_t)0);      /* forwardingStatus: unknown */
+	CHECK_EQ(u8(v4, 86), (uint8_t)0xb8);   /* ipClassOfService: EF */
 
-	/* [2] v6 data set: two records (UDP, ICMPv6), len 16+4+2*90, seq 1. */
+	/* [2] v6 data set: two records (UDP, ICMPv6), len 16+4+2*91, seq 1. */
 	const auto &v6 = d[2];
-	CHECK_EQ(v6.size(), (size_t)200);
+	CHECK_EQ(v6.size(), (size_t)202);
 	CHECK_EQ(r32(v6, 8), (uint32_t)1);
 	CHECK_EQ(r16(v6, 16), (uint16_t)257);
-	CHECK_EQ(r16(v6, 18), (uint16_t)184);		 /* 4 + 2*90 */
+	CHECK_EQ(r16(v6, 18), (uint16_t)186);		 /* 4 + 2*91 */
 	CHECK(std::memcmp(v6.data() + 20, s1, 16) == 0); /* 2001:db8::1 */
 	CHECK(std::memcmp(v6.data() + 36, s2, 16) == 0); /* 2001:db8::2 */
 	CHECK_EQ(r16(v6, 52), (uint16_t)53);
@@ -331,12 +336,13 @@ static void test_ipfix_wire()
 	CHECK_EQ(r32(v6, 103), (uint32_t)1); /* samplingInterval */
 	CHECK_EQ(r16(v6, 107), (uint16_t)0); /* vlanId: untagged */
 	CHECK_EQ(u8(v6, 109), (uint8_t)0);   /* forwardingStatus: unknown */
+	CHECK_EQ(u8(v6, 110), (uint8_t)0);   /* ipClassOfService */
 
-	/* second v6 record (offset 110): ICMPv6 echo request, 128 << 8 | 0,
+	/* second v6 record (offset 111): ICMPv6 echo request, 128 << 8 | 0,
 	 * emitted as a drop record. */
-	CHECK_EQ(u8(v6, 110 + 36), (uint8_t)58);       /* protocolIdentifier */
-	CHECK_EQ(r16(v6, 110 + 79), (uint16_t)0x8000); /* icmpTypeCodeIPv6 */
-	CHECK_EQ(u8(v6, 110 + 89), (uint8_t)130);      /* forwardingStatus: ACL drop */
+	CHECK_EQ(u8(v6, 111 + 36), (uint8_t)58);       /* protocolIdentifier */
+	CHECK_EQ(r16(v6, 111 + 79), (uint16_t)0x8000); /* icmpTypeCodeIPv6 */
+	CHECK_EQ(u8(v6, 111 + 89), (uint8_t)130);      /* forwardingStatus: ACL drop */
 }
 
 /* ---------- §5 key/value layouts (pinned by bpf/obserwrt-flow.h) ---------- */
@@ -397,8 +403,10 @@ static void test_key_value_layouts()
 	CHECK_EQ(vp[33], (uint8_t)0x00);
 	CHECK_EQ(vp[34], (uint8_t)0x00); /* vlan_id 0 = untagged */
 	CHECK_EQ(vp[35], (uint8_t)0x00);
-	for (int i = 36; i < 40; i++)
+	CHECK_EQ(vp[36], (uint8_t)0x00); /* tos */
+	for (int i = 37; i < 40; i++)
 		CHECK_EQ(vp[i], (uint8_t)0x00); /* trailing pad */
+	CHECK_EQ(offsetof(struct flow_val, tos), (size_t)36);
 
 	FV vt{};
 	vt.vlan_id = 0x0123;
@@ -578,9 +586,11 @@ static void test_syslog_export()
 	v.last_seen = 20;
 	v.tcp_flags = 2;
 	v.vlan_id = 10;
+	v.tos = 0xb9; /* DSCP 46, ECN 1: syslog reports DSCP only */
 
 	const std::string js = obserwrt::SyslogExporter::encode_json(k, v, true, nullptr, "30");
-	CHECK(js.find("\"tcp_flags\":2,\"vlan_id\":10,\"expired\":true") != std::string::npos);
+	CHECK(js.find("\"tcp_flags\":2,\"vlan_id\":10,\"dscp\":46,\"expired\":true") !=
+	      std::string::npos);
 	CHECK(js.find("\"ifname\":\"30\"") != std::string::npos);
 	CHECK(js.find("\"src\":\"192.0.2.10\"") != std::string::npos);
 	CHECK(js.find("\"dst\":\"198.51.100.20\"") != std::string::npos);
@@ -622,7 +632,7 @@ static void test_syslog_export()
 	CHECK(lf.find("src=\"2001:db8::1\"") != std::string::npos);
 	CHECK(lf.find("dst=\"2001:db8::2\"") != std::string::npos);
 	CHECK(lf.find("expired=0") != std::string::npos);
-	CHECK(lf.find(" vlan_id=0 expired=0") != std::string::npos);
+	CHECK(lf.find(" vlan_id=0 dscp=0 expired=0") != std::string::npos);
 
 	/* RFC 5424 envelope. */
 	const std::string fr = obserwrt::SyslogExporter::frame(lf, "probe-awg0", 1700000000);
@@ -637,7 +647,7 @@ static void test_config_mini()
 				 "device = awg* br-lan\n"
 				 "tcp_timeout = 300\n"
 				 "max_flows = 8192\n"
-				 "track_drops = yes\n"
+				 "enable_drops = yes\n"
 				 "[ipfix]\n"
 				 "enabled = true\n"
 				 "collector_host = 192.0.2.10\n"
@@ -652,8 +662,8 @@ static void test_config_mini()
 	CHECK(c.devices[1] == "br-lan");
 	CHECK_EQ(c.timeouts.tcp, (uint64_t)300);
 	CHECK_EQ(c.max_flows, (uint32_t)8192);
-	CHECK(c.track_drops);
-	CHECK(!obserwrt::load_config_string("[main]\n", &err).track_drops); /* default off */
+	CHECK(c.enable_drops);
+	CHECK(!obserwrt::load_config_string("[main]\n", &err).enable_drops); /* default off */
 	CHECK(c.ipfix.enabled);
 	CHECK(c.ipfix.collector_host == "192.0.2.10");
 	CHECK_EQ(c.ipfix.collector_port, (uint16_t)4739);

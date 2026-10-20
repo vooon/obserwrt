@@ -50,6 +50,7 @@ struct SyslogRecord {
 	uint64_t last_seen_ns;
 	uint16_t tcp_flags;
 	uint16_t vlan_id;
+	uint8_t dscp;
 	bool expired;
 	uint8_t forwarding_status;
 	std::string drop_reason; /* empty for flow records */
@@ -90,6 +91,7 @@ SyslogRecord make_record(const FlowKey &k, const FlowValue &v, bool expired, con
 	r.last_seen_ns = v.last_seen;
 	r.tcp_flags = v.tcp_flags;
 	r.vlan_id = v.vlan_id;
+	r.dscp = static_cast<uint8_t>(v.tos >> 2);
 	r.expired = expired;
 	r.forwarding_status = drop ? drop->forwarding_status : 0;
 	r.drop_reason = drop ? drop->reason : std::string();
@@ -191,6 +193,7 @@ std::string SyslogExporter::encode_json(const FlowKey &k, const FlowValue &v, bo
 	o["last_seen_ns"] = r.last_seen_ns;
 	o["tcp_flags"] = r.tcp_flags;
 	o["vlan_id"] = r.vlan_id;
+	o["dscp"] = r.dscp;
 	o["expired"] = r.expired;
 	o["forwarding_status"] = r.forwarding_status;
 	o["drop_reason"] = r.drop_reason;
@@ -239,6 +242,8 @@ std::string SyslogExporter::encode_logfmt(const FlowKey &k, const FlowValue &v, 
 	out += fmt_u64(r.tcp_flags);
 	out += " vlan_id=";
 	out += fmt_u64(r.vlan_id);
+	out += " dscp=";
+	out += std::to_string(r.dscp);
 	out += " expired=";
 	out += r.expired ? "1" : "0";
 	out += " forwarding_status=";

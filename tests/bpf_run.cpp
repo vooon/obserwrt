@@ -93,9 +93,10 @@ std::vector<uint8_t> eth(const uint8_t dst[6], uint16_t ethertype, int vlan = -1
 	return p;
 }
 
-void ipv4(std::vector<uint8_t> &p, uint8_t proto, const uint8_t s[4], const uint8_t d[4])
+void ipv4(std::vector<uint8_t> &p, uint8_t proto, const uint8_t s[4], const uint8_t d[4],
+	  uint8_t tos = 0)
 {
-	uint8_t h[20] = {0x45};
+	uint8_t h[20] = {0x45, tos};
 	h[8] = 64;
 	h[9] = proto;
 	std::memcpy(h + 12, s, 4);
@@ -152,6 +153,7 @@ void test_eth_tcp_gso(const Ctx &c)
 	CHECK_EQ(v.bytes, 3040 + 9 * 40);
 	CHECK_EQ(v.tcp_flags, 0x18);
 	CHECK_EQ(v.vlan_id, 0); /* untagged */
+	CHECK_EQ(v.tos, 0);
 }
 
 /* 802.1Q-tagged UDP: the parser walks the tag to L3 and records the VID
@@ -161,7 +163,7 @@ void test_vlan_udp(const Ctx &c)
 	const uint8_t dmac[6] = {0x02, 0xaa, 0, 0, 0, 0x02};
 	const uint8_t s[4] = {192, 0, 2, 3}, d[4] = {198, 51, 100, 4};
 	std::vector<uint8_t> p = eth(dmac, 0x0800, 100);
-	ipv4(p, 17, s, d);
+	ipv4(p, 17, s, d, 0xb8);			 /* DSCP 46 (EF) */
 	const uint8_t udp[8] = {0x12, 0x34, 0x00, 0x35}; /* 4660 -> 53 */
 	p.insert(p.end(), udp, udp + 8);
 	p.resize(p.size() + 100);
@@ -176,6 +178,7 @@ void test_vlan_udp(const Ctx &c)
 	CHECK_EQ(v.packets, 1);
 	CHECK_EQ(v.bytes, 20 + 8 + 100);
 	CHECK_EQ(v.vlan_id, 100);
+	CHECK_EQ(v.tos, 0xb8);
 }
 
 /* IPv6 Hop-by-Hop (Hdr Ext Len 0 = 8 bytes) in front of an ICMPv6 MLDv2
@@ -184,9 +187,9 @@ void test_ipv6_hbh(const Ctx &c)
 {
 	const uint8_t dmac[6] = {0x33, 0x33, 0, 0, 0, 0x16};
 	std::vector<uint8_t> p = eth(dmac, 0x86dd);
-	uint8_t h[40] = {0x60};
-	h[5] = 16; /* payload: HBH 8 + ICMPv6 8 */
-	h[6] = 0;  /* next: Hop-by-Hop */
+	uint8_t h[40] = {0x6b, 0x80}; /* Traffic Class 0xb8 (DSCP 46) */
+	h[5] = 16;		      /* payload: HBH 8 + ICMPv6 8 */
+	h[6] = 0;		      /* next: Hop-by-Hop */
 	h[7] = 1;
 	h[8] = 0xfe;
 	h[9] = 0x80;
@@ -216,6 +219,7 @@ void test_ipv6_hbh(const Ctx &c)
 		return;
 	}
 	CHECK_EQ(v.bytes, 40 + 8 + 8);
+	CHECK_EQ(v.tos, 0xb8);
 }
 
 /* ARP is seen but not accounted. */

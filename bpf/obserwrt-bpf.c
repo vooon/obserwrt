@@ -476,6 +476,9 @@ observe(struct __sk_buff *skb, __u8 direction, const int eth)
 		nv.tcp_flags = tcpf;
 		if (eth)              /* VLAN is not identity (§4): first packet's */
 			nv.vlan_id = outer_vlan(skb);
+		/* TOS / Traffic Class of the first packet (`ip` is bounds-checked
+		 * for the full base header above). */
+		nv.tos = family == 4 ? ip[1] : (__u8)((ip[0] << 4) | (ip[1] >> 4));
 		if (bpf_map_update_elem(&obserwrt_flows, &key, &nv, BPF_ANY) == 0)
 			stat_add(STAT_FLOWS_CREATED, 1);
 	}
@@ -529,7 +532,7 @@ struct sk_buff {
  * than the TC parser on purpose: IPv6 extension headers are not walked (the
  * next-header value is recorded as the protocol, ports 0). */
 static __always_inline __u32
-drop_parse(unsigned char *l3, __u16 proto, struct drop_key *dk, __u8 *tcpf)
+drop_parse(unsigned char *l3, __u16 proto, struct drop_key *dk, __u8 *tcpf, __u8 *tos)
 {
 	__u8 hdr[40];
 	__u8 l4[14];
@@ -545,6 +548,7 @@ drop_parse(unsigned char *l3, __u16 proto, struct drop_key *dk, __u8 *tcpf)
 			return 0;
 		ip_proto = hdr[9];
 		dk->flow.family = 4;
+		*tos = hdr[1];
 		ip4_to_in6(dk->flow.src, hdr + 12);
 		ip4_to_in6(dk->flow.dst, hdr + 16);
 		l3len = bpf_ntohs(*(__u16 *)(hdr + 2));
@@ -555,6 +559,7 @@ drop_parse(unsigned char *l3, __u16 proto, struct drop_key *dk, __u8 *tcpf)
 		ihl = 40;
 		ip_proto = hdr[6];
 		dk->flow.family = 6;
+		*tos = (__u8)((hdr[0] << 4) | (hdr[1] >> 4));
 		__builtin_memcpy(dk->flow.src, hdr + 8, 16);
 		__builtin_memcpy(dk->flow.dst, hdr + 24, 16);
 		l3len = 40 + bpf_ntohs(*(__u16 *)(hdr + 4));
@@ -593,7 +598,7 @@ int obserwrt_kfree_skb(__u64 *ctx)
 	unsigned char *head;
 	__u32 ifindex, l3len = 0;
 	__u16 nh, proto;
-	__u8 tcpf = 0;
+	__u8 tcpf = 0, tos = 0;
 
 	dev = skb->dev;
 	if (!dev)
@@ -608,7 +613,7 @@ int obserwrt_kfree_skb(__u64 *ctx)
 	nh = skb->network_header;
 	proto = bpf_ntohs(skb->protocol);
 	if (head && nh != (__u16)~0U)
-		l3len = drop_parse(head + nh, proto, &dk, &tcpf);
+		l3len = drop_parse(head + nh, proto, &dk, &tcpf, &tos);
 	if (l3len == 0) {
 		stat_add(STAT_DROPS_UNPARSED, 1);
 		return 0;
@@ -633,6 +638,7 @@ int obserwrt_kfree_skb(__u64 *ctx)
 		nv.first_seen = now;
 		nv.last_seen = now;
 		nv.tcp_flags = tcpf;
+		nv.tos = tos;
 		bpf_map_update_elem(&obserwrt_drops, &dk, &nv, BPF_ANY);
 	}
 	return 0;
