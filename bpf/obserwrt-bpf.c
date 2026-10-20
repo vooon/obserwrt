@@ -41,11 +41,8 @@
 #include <uapi/linux/types.h>
 #include <uapi/linux/pkt_cls.h>
 #include <uapi/linux/if_ether.h>
-#include <uapi/linux/ip.h>
-#include <uapi/linux/ipv6.h>
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
-#include <bpf/bpf_core_read.h>
 
 /* Shared flow key/value layouts (docs/design.md §5) - the single owner of
  * the wire format, also included by the C++ agent (flow.hpp). */
@@ -189,7 +186,7 @@ pkt_class(struct __sk_buff *skb, int eth)
  * it once on its own, and the caller only sees "returns a scalar". Inlined,
  * its branches multiply the states the verifier walks through the flow
  * parser, and the eth programs exceed the 1M-instruction limit (E2BIG). */
-__attribute__((noinline)) int
+__attribute__((__noinline__)) int
 obserwrt_dev_count(struct __sk_buff *skb, __u32 direction, int eth, __u32 segs)
 {
 	struct dev_key k = { 0 };

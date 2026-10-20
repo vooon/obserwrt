@@ -43,9 +43,15 @@ CMAKE_OPTIONS += \
 # compiled from source by bpf.mk's CompileBPF. No FLOW_MAP_ENTRIES define is
 # passed: obserwrt-bpf.c defaults to 4096, and the daemon's runtime
 # `max_flows` overrides it at load (max_flows=0 stays the 4k baked default).
+#
+# `-target $(BPF_TARGET)`: CompileBPF runs the clang front end for a MIPS
+# target and switches to BPF only in opt/llc. A non-BPF front end ignores
+# __attribute__((preserve_access_index)), so the drop tracer would get no
+# CO-RE relocations (wrong sk_buff offsets). clang honours the LAST -target,
+# and the extra flags come after bpf.mk's own.
 define Build/Compile
 	$(call Build/Compile/Default)
-	$(call CompileBPF,$(PKG_BUILD_DIR)/bpf/obserwrt-bpf.c)
+	$(call CompileBPF,$(PKG_BUILD_DIR)/bpf/obserwrt-bpf.c,-target $(BPF_TARGET))
 endef
 
 define Package/obserwrt
