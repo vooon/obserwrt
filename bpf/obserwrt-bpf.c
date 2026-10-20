@@ -108,11 +108,10 @@ stat_add(__u32 idx, __u64 n)
 }
 
 /* Packet class (OBSERWRT_CLASS_*): EtherType after up to two VLAN tags on
- * Ethernet, the IP version nibble on L3 devices. Deliberately separate from
- * the flow parser (a few re-read bytes) so the class does not add verifier
- * states to the parser's IPv6 extension-header walk. */
+ * Ethernet, the IP version nibble on L3 devices. Re-reads a few bytes rather
+ * than sharing the flow parser's state. */
 static __always_inline __u32
-pkt_class(struct __sk_buff *skb, const int eth)
+pkt_class(struct __sk_buff *skb, int eth)
 {
 	__u8 *data = (__u8 *)(__u64)skb->data;
 	__u8 *data_end = (__u8 *)(__u64)skb->data_end;
@@ -151,12 +150,18 @@ pkt_class(struct __sk_buff *skb, const int eth)
 	return OBSERWRT_CLASS_OTHER;
 }
 
-/* Add one (GSO-aware) packet to its device/direction/class counters. */
-static __always_inline void
-dev_count(struct __sk_buff *skb, __u8 direction, __u32 cls, __u32 segs)
+/* Add one (GSO-aware) packet to its device/direction/class counters.
+ *
+ * A GLOBAL (non-static, noinline) function on purpose: the verifier checks
+ * it once on its own, and the caller only sees "returns a scalar". Inlined,
+ * its branches multiply the states the verifier walks through the flow
+ * parser, and the eth programs exceed the 1M-instruction limit (E2BIG). */
+__attribute__((noinline)) int
+obserwrt_dev_count(struct __sk_buff *skb, __u32 direction, int eth, __u32 segs)
 {
 	struct dev_key k = { 0 };
 	struct dev_val *v;
+	__u32 cls = pkt_class(skb, eth);
 
 	k.ifindex = skb->ifindex;
 	k.direction = direction;
@@ -170,12 +175,13 @@ dev_count(struct __sk_buff *skb, __u8 direction, __u32 cls, __u32 segs)
 		bpf_map_update_elem(&obserwrt_devstats, &k, &z, BPF_NOEXIST);
 		v = bpf_map_lookup_elem(&obserwrt_devstats, &k);
 		if (!v)
-			return;
+			return 0;
 	}
 
 	cls &= OBSERWRT_CLASS_MAX - 1;   /* bound for the verifier */
 	v->packets[cls] += segs;       /* per-CPU slot: no atomic needed */
 	v->bytes[cls] += skb->len;
+	return 0;
 }
 
 /* Store a 4-byte IPv4 address as IPv4-mapped IPv6 (::ffff:a.b.c.d). */
@@ -264,7 +270,7 @@ observe(struct __sk_buff *skb, __u8 direction, const int eth)
 
 	stat_add(STAT_PACKETS, segs);
 	stat_add(STAT_BYTES, skb->len);
-	dev_count(skb, direction, pkt_class(skb, eth), segs);
+	obserwrt_dev_count(skb, direction, eth, segs);
 
 	if (data + 2 > data_end)
 		return TC_ACT_OK;
