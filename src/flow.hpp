@@ -43,6 +43,7 @@ enum : uint8_t {
 
 using FlowKey = struct flow_key;
 using FlowValue = struct flow_val;
+using DropKey = struct drop_key;
 /* Sizes asserted once in bpf/obserwrt-flow.h (shared with the eBPF program). */
 
 /* XXH3-based hash of the packed key bytes, implemented in hash.cpp (xxhash is
@@ -66,6 +67,13 @@ struct DevCounters {
 	uint8_t direction;
 	uint64_t packets[OBSERWRT_CLASS_MAX];
 	uint64_t bytes[OBSERWRT_CLASS_MAX];
+};
+
+/* A drop record's extra fields (§7.1): RFC 7270 forwardingStatus and the
+ * kernel's drop-reason name (without the SKB_DROP_REASON_ prefix). */
+struct DropInfo {
+	uint8_t forwarding_status;
+	std::string reason;
 };
 
 /* Interval growth handed to exporters by the lifecycle (active-flow delta

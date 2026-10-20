@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "config.hpp"
+#include "drop_reasons.hpp"
 #include "exporter_ipfix.hpp"
 #include "exporter_syslog.hpp"
 #include "flow.hpp"
@@ -228,26 +229,26 @@ static void test_ipfix_wire()
 	k3.dport = 0;
 	k3.icmp_type = 128;
 	k3.icmp_code = 0;
-	e.emit(k3, v2, false, nullptr);
+	e.emit(k3, v2, false, nullptr, 130); /* a drop record: ACL drop */
 	e.flush(1615382640ULL);
 
 	const auto &d = e.captured();
 	CHECK_EQ(d.size(), (size_t)3);
 
-	/* [0] templates: len 168, version 10, exportTime, seq 0, domain 1. */
+	/* [0] templates: len 176, version 10, exportTime, seq 0, domain 1. */
 	const auto &t = d[0];
-	CHECK_EQ(t.size(), (size_t)168);
+	CHECK_EQ(t.size(), (size_t)176);
 	CHECK_EQ(r16(t, 0), (uint16_t)10);
-	CHECK_EQ(r16(t, 2), (uint16_t)168);
+	CHECK_EQ(r16(t, 2), (uint16_t)176);
 	CHECK_EQ(r32(t, 4), (uint32_t)1615382640);
 	CHECK_EQ(r32(t, 8), (uint32_t)0);
 	CHECK_EQ(r32(t, 12), (uint32_t)1);
 
-	/* set 1: TemplateSet(2) with v4 template tid 256, 17 fields, first (8,4). */
+	/* set 1: TemplateSet(2) with v4 template tid 256, 18 fields, first (8,4). */
 	CHECK_EQ(r16(t, 16), (uint16_t)2);
-	CHECK_EQ(r16(t, 18), (uint16_t)76);
+	CHECK_EQ(r16(t, 18), (uint16_t)80);
 	CHECK_EQ(r16(t, 20), (uint16_t)256);
-	CHECK_EQ(r16(t, 22), (uint16_t)17);
+	CHECK_EQ(r16(t, 22), (uint16_t)18);
 	CHECK_EQ(r16(t, 24), (uint16_t)8);
 	CHECK_EQ(r16(t, 26), (uint16_t)4);
 	/* IE 7/8 are flowStart/EndMilliseconds (152/153), not Seconds (150/151). */
@@ -263,27 +264,30 @@ static void test_ipfix_wire()
 	CHECK_EQ(r16(t, 82), (uint16_t)1);
 	CHECK_EQ(r16(t, 84), (uint16_t)34); /* samplingInterval */
 	CHECK_EQ(r16(t, 86), (uint16_t)4);
-	CHECK_EQ(r16(t, 88), (uint16_t)58); /* last field: vlanId */
+	CHECK_EQ(r16(t, 88), (uint16_t)58); /* vlanId */
 	CHECK_EQ(r16(t, 90), (uint16_t)2);
+	CHECK_EQ(r16(t, 92), (uint16_t)89); /* last field: forwardingStatus */
+	CHECK_EQ(r16(t, 94), (uint16_t)1);
 
-	/* set 2: v6 template tid 257: set hdr @92, template hdr @96, fields @100. */
-	CHECK_EQ(r16(t, 92), (uint16_t)2);
-	CHECK_EQ(r16(t, 94), (uint16_t)76);
-	CHECK_EQ(r16(t, 96), (uint16_t)257);
-	CHECK_EQ(r16(t, 98), (uint16_t)17);
-	CHECK_EQ(r16(t, 100), (uint16_t)27); /* sourceIPv6Address */
-	CHECK_EQ(r16(t, 102), (uint16_t)16);
-	CHECK_EQ(r16(t, 128), (uint16_t)152); /* flowStartMilliseconds */
-	CHECK_EQ(r16(t, 132), (uint16_t)153); /* flowEndMilliseconds */
-	CHECK_EQ(r16(t, 148), (uint16_t)139); /* icmpTypeCodeIPv6 */
-	CHECK_EQ(r16(t, 164), (uint16_t)58);  /* vlanId */
+	/* set 2: v6 template tid 257: set hdr @96, template hdr @100, fields @104. */
+	CHECK_EQ(r16(t, 96), (uint16_t)2);
+	CHECK_EQ(r16(t, 98), (uint16_t)80);
+	CHECK_EQ(r16(t, 100), (uint16_t)257);
+	CHECK_EQ(r16(t, 102), (uint16_t)18);
+	CHECK_EQ(r16(t, 104), (uint16_t)27); /* sourceIPv6Address */
+	CHECK_EQ(r16(t, 106), (uint16_t)16);
+	CHECK_EQ(r16(t, 132), (uint16_t)152); /* flowStartMilliseconds */
+	CHECK_EQ(r16(t, 136), (uint16_t)153); /* flowEndMilliseconds */
+	CHECK_EQ(r16(t, 152), (uint16_t)139); /* icmpTypeCodeIPv6 */
+	CHECK_EQ(r16(t, 168), (uint16_t)58);  /* vlanId */
+	CHECK_EQ(r16(t, 172), (uint16_t)89);  /* forwardingStatus */
 
-	/* [1] v4 data record: len 85, seq 0. */
+	/* [1] v4 data record: len 86, seq 0. */
 	const auto &v4 = d[1];
-	CHECK_EQ(v4.size(), (size_t)85);
+	CHECK_EQ(v4.size(), (size_t)86);
 	CHECK_EQ(r32(v4, 8), (uint32_t)0);	     /* seq */
 	CHECK_EQ(r16(v4, 16), (uint16_t)256);	     /* data set id */
-	CHECK_EQ(r16(v4, 18), (uint16_t)69);	     /* set length 4+65 */
+	CHECK_EQ(r16(v4, 18), (uint16_t)70);	     /* set length 4+66 */
 	CHECK_EQ(r32(v4, 20), (uint32_t)0xc0000201); /* 192.0.2.1 */
 	CHECK_EQ(r32(v4, 24), (uint32_t)0xc6336402); /* 198.51.100.2 */
 	CHECK_EQ(r16(v4, 28), (uint16_t)12345);
@@ -301,13 +305,14 @@ static void test_ipfix_wire()
 	CHECK_EQ(u8(v4, 78), (uint8_t)2);      /* flowEndReason: active */
 	CHECK_EQ(r32(v4, 79), (uint32_t)1);    /* samplingInterval */
 	CHECK_EQ(r16(v4, 83), (uint16_t)100);  /* vlanId */
+	CHECK_EQ(u8(v4, 85), (uint8_t)0);      /* forwardingStatus: unknown */
 
-	/* [2] v6 data set: two records (UDP, ICMPv6), len 16+4+2*89, seq 1. */
+	/* [2] v6 data set: two records (UDP, ICMPv6), len 16+4+2*90, seq 1. */
 	const auto &v6 = d[2];
-	CHECK_EQ(v6.size(), (size_t)198);
+	CHECK_EQ(v6.size(), (size_t)200);
 	CHECK_EQ(r32(v6, 8), (uint32_t)1);
 	CHECK_EQ(r16(v6, 16), (uint16_t)257);
-	CHECK_EQ(r16(v6, 18), (uint16_t)182);		 /* 4 + 2*89 */
+	CHECK_EQ(r16(v6, 18), (uint16_t)184);		 /* 4 + 2*90 */
 	CHECK(std::memcmp(v6.data() + 20, s1, 16) == 0); /* 2001:db8::1 */
 	CHECK(std::memcmp(v6.data() + 36, s2, 16) == 0); /* 2001:db8::2 */
 	CHECK_EQ(r16(v6, 52), (uint16_t)53);
@@ -325,10 +330,13 @@ static void test_ipfix_wire()
 	CHECK_EQ(u8(v6, 102), (uint8_t)1);   /* flowEndReason: idle (expired) */
 	CHECK_EQ(r32(v6, 103), (uint32_t)1); /* samplingInterval */
 	CHECK_EQ(r16(v6, 107), (uint16_t)0); /* vlanId: untagged */
+	CHECK_EQ(u8(v6, 109), (uint8_t)0);   /* forwardingStatus: unknown */
 
-	/* second v6 record (offset 109): ICMPv6 echo request, 128 << 8 | 0. */
-	CHECK_EQ(u8(v6, 109 + 36), (uint8_t)58);       /* protocolIdentifier */
-	CHECK_EQ(r16(v6, 109 + 79), (uint16_t)0x8000); /* icmpTypeCodeIPv6 */
+	/* second v6 record (offset 110): ICMPv6 echo request, 128 << 8 | 0,
+	 * emitted as a drop record. */
+	CHECK_EQ(u8(v6, 110 + 36), (uint8_t)58);       /* protocolIdentifier */
+	CHECK_EQ(r16(v6, 110 + 79), (uint16_t)0x8000); /* icmpTypeCodeIPv6 */
+	CHECK_EQ(u8(v6, 110 + 89), (uint8_t)130);      /* forwardingStatus: ACL drop */
 }
 
 /* ---------- §5 key/value layouts (pinned by bpf/obserwrt-flow.h) ---------- */
@@ -403,6 +411,59 @@ static void test_key_value_layouts()
 	CHECK_EQ(v.first_seen, (uint64_t)1700000000000000000ULL);
 	CHECK_EQ(v.last_seen, (uint64_t)1700006000000000000ULL);
 	CHECK_EQ(v.tcp_flags, (uint16_t)0x18);
+}
+
+/* ---------- §7.1 drop records ---------- */
+
+static void test_drop_reasons()
+{
+	using DR = obserwrt::DropReasons;
+	CHECK_EQ(sizeof(obserwrt::DropKey), (size_t)52);
+	CHECK_EQ(offsetof(struct drop_key, reason), (size_t)48);
+
+	CHECK_EQ(DR::status_for_name("NOT_SPECIFIED"), (uint8_t)128);
+	CHECK_EQ(DR::status_for_name("NETFILTER_DROP"), (uint8_t)130);
+	CHECK_EQ(DR::status_for_name("TC_INGRESS"), (uint8_t)130);
+	CHECK_EQ(DR::status_for_name("IP_RPFILTER"), (uint8_t)140);
+	CHECK_EQ(DR::status_for_name("IP_OUTNOROUTES"), (uint8_t)131);
+	CHECK_EQ(DR::status_for_name("IP_CSUM"), (uint8_t)134);
+	CHECK_EQ(DR::status_for_name("PKT_TOO_BIG"), (uint8_t)133);
+	CHECK_EQ(DR::status_for_name("PKT_TOO_SMALL"), (uint8_t)135);
+	CHECK_EQ(DR::status_for_name("IP_INHDR"), (uint8_t)136);
+	CHECK_EQ(DR::status_for_name("NEIGH_FAILED"), (uint8_t)132);
+	CHECK_EQ(DR::status_for_name("QDISC_DROP"), (uint8_t)139);
+	CHECK_EQ(DR::status_for_name("CPU_BACKLOG"), (uint8_t)139);
+	CHECK_EQ(DR::status_for_name("DEV_READY"), (uint8_t)142);
+	CHECK_EQ(DR::status_for_name("NO_SOCKET"), (uint8_t)128);
+
+	DR dr;
+	dr.add(6, "NETFILTER_DROP");
+	CHECK(dr.lookup(6).name == "NETFILTER_DROP");
+	CHECK_EQ(dr.lookup(6).forwarding_status, (uint8_t)130);
+	CHECK(dr.lookup(9999).name == "reason_9999"); /* unresolved -> 128 */
+	CHECK_EQ(dr.lookup(9999).forwarding_status, (uint8_t)128);
+
+	/* syslog: drop fields on drop records, defaults on flow records. */
+	FK k{};
+	k.ifindex = 3;
+	k.family = 4;
+	k.protocol = 6;
+	std::memcpy(k.src, v4in6(192, 0, 2, 66).data(), 16);
+	std::memcpy(k.dst, v4in6(198, 51, 100, 1).data(), 16);
+	FV v{};
+	v.packets = 1;
+	const obserwrt::DropInfo di{130, "NETFILTER_DROP"};
+	const std::string js =
+	    obserwrt::SyslogExporter::encode_json(k, v, false, nullptr, "eth0", &di);
+	CHECK(js.find("\"forwarding_status\":130,\"drop_reason\":\"NETFILTER_DROP\"") !=
+	      std::string::npos);
+	const std::string lf =
+	    obserwrt::SyslogExporter::encode_logfmt(k, v, false, nullptr, "eth0", &di);
+	CHECK(lf.find(" forwarding_status=130 drop_reason=\"NETFILTER_DROP\"") !=
+	      std::string::npos);
+	const std::string flow =
+	    obserwrt::SyslogExporter::encode_json(k, v, false, nullptr, "eth0");
+	CHECK(flow.find("\"forwarding_status\":0,\"drop_reason\":\"\"") != std::string::npos);
 }
 
 /* ---------- 04_lifecycle/01_delta (pinned ucode test) ---------- */
@@ -576,6 +637,7 @@ static void test_config_mini()
 				 "device = awg* br-lan\n"
 				 "tcp_timeout = 300\n"
 				 "max_flows = 8192\n"
+				 "track_drops = yes\n"
 				 "[ipfix]\n"
 				 "enabled = true\n"
 				 "collector_host = 192.0.2.10\n"
@@ -590,6 +652,8 @@ static void test_config_mini()
 	CHECK(c.devices[1] == "br-lan");
 	CHECK_EQ(c.timeouts.tcp, (uint64_t)300);
 	CHECK_EQ(c.max_flows, (uint32_t)8192);
+	CHECK(c.track_drops);
+	CHECK(!obserwrt::load_config_string("[main]\n", &err).track_drops); /* default off */
 	CHECK(c.ipfix.enabled);
 	CHECK(c.ipfix.collector_host == "192.0.2.10");
 	CHECK_EQ(c.ipfix.collector_port, (uint16_t)4739);
@@ -713,6 +777,7 @@ int main()
 	test_lifecycle_delta();
 	test_syslog_export();
 	test_config_mini();
+	test_drop_reasons();
 	test_prometheus();
 	test_device_metrics();
 	test_link_framing();

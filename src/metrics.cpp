@@ -70,6 +70,14 @@ void Metrics::set_bpf(unsigned long long packets, unsigned long long bytes,
 	bpf_flows_created_ = flows_created;
 }
 
+void Metrics::set_drops(unsigned long long drops, unsigned long long unparsed)
+{
+	if (!active_)
+		return;
+	bpf_drops_ = drops;
+	bpf_drops_unparsed_ = unparsed;
+}
+
 void Metrics::set_devices(std::vector<DeviceCounters> devices)
 {
 	if (!active_)
@@ -112,6 +120,11 @@ void Metrics::write()
 		   "", bpf_accounted_);
 	px.counter("obserwrt_flows_created_total", "Flow entries created in the BPF map.", "",
 		   bpf_flows_created_);
+	px.counter("obserwrt_drops_total",
+		   "Packets the kernel dropped on attached devices (drop tracer).", "", bpf_drops_);
+	px.counter("obserwrt_drops_unparsed_total",
+		   "Dropped packets not exported (not IPv4/IPv6 or no network header).", "",
+		   bpf_drops_unparsed_);
 	px.gauge("obserwrt_flows_active", "Currently live flows.", "", flows_active_);
 	px.gauge("obserwrt_bpf_map_entries", "Current flow map entries.", "", map_entries_);
 	px.gauge("obserwrt_bpf_map_limit", "Flow map capacity (LRU).", "", map_limit_);

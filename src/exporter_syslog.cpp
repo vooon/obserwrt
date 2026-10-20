@@ -51,6 +51,8 @@ struct SyslogRecord {
 	uint16_t tcp_flags;
 	uint16_t vlan_id;
 	bool expired;
+	uint8_t forwarding_status;
+	std::string drop_reason; /* empty for flow records */
 };
 
 /* Convert the 16-byte address field to text: dotted quad for family 4
@@ -68,7 +70,7 @@ std::string addr_text(const uint8_t *a, uint8_t family)
 }
 
 SyslogRecord make_record(const FlowKey &k, const FlowValue &v, bool expired, const Delta *delta,
-			 const std::string &ifname)
+			 const std::string &ifname, const DropInfo *drop)
 {
 	SyslogRecord r;
 	r.ifindex = k.ifindex;
@@ -89,6 +91,8 @@ SyslogRecord make_record(const FlowKey &k, const FlowValue &v, bool expired, con
 	r.tcp_flags = v.tcp_flags;
 	r.vlan_id = v.vlan_id;
 	r.expired = expired;
+	r.forwarding_status = drop ? drop->forwarding_status : 0;
+	r.drop_reason = drop ? drop->reason : std::string();
 	return r;
 }
 
@@ -162,9 +166,10 @@ bool SyslogExporter::init(const Config::Syslog &cfg, std::string *error)
 }
 
 std::string SyslogExporter::encode_json(const FlowKey &k, const FlowValue &v, bool expired,
-					const Delta *delta, const std::string &ifname)
+					const Delta *delta, const std::string &ifname,
+					const DropInfo *drop)
 {
-	const SyslogRecord r = make_record(k, v, expired, delta, ifname);
+	const SyslogRecord r = make_record(k, v, expired, delta, ifname, drop);
 
 	/* ordered_json preserves key insertion order (mirrors the ucode %J field
 	 * order so downstream diffs stay readable). */
@@ -187,14 +192,17 @@ std::string SyslogExporter::encode_json(const FlowKey &k, const FlowValue &v, bo
 	o["tcp_flags"] = r.tcp_flags;
 	o["vlan_id"] = r.vlan_id;
 	o["expired"] = r.expired;
+	o["forwarding_status"] = r.forwarding_status;
+	o["drop_reason"] = r.drop_reason;
 	/* dump() without arguments: compact, no spaces, proper escaping. */
 	return o.dump();
 }
 
 std::string SyslogExporter::encode_logfmt(const FlowKey &k, const FlowValue &v, bool expired,
-					  const Delta *delta, const std::string &ifname)
+					  const Delta *delta, const std::string &ifname,
+					  const DropInfo *drop)
 {
-	const SyslogRecord r = make_record(k, v, expired, delta, ifname);
+	const SyslogRecord r = make_record(k, v, expired, delta, ifname, drop);
 	std::string out;
 	out.reserve(320);
 	out += "ifindex=";
@@ -233,16 +241,20 @@ std::string SyslogExporter::encode_logfmt(const FlowKey &k, const FlowValue &v, 
 	out += fmt_u64(r.vlan_id);
 	out += " expired=";
 	out += r.expired ? "1" : "0";
+	out += " forwarding_status=";
+	out += std::to_string(r.forwarding_status);
+	out += " drop_reason=";
+	out += nlohmann::json(r.drop_reason).dump();
 	return out;
 }
 
 std::string SyslogExporter::encode(const FlowKey &k, const FlowValue &v, bool expired,
 				   const Delta *delta, const std::string &ifname,
-				   const std::string &format)
+				   const std::string &format, const DropInfo *drop)
 {
 	if (format == "json")
-		return encode_json(k, v, expired, delta, ifname);
-	return encode_logfmt(k, v, expired, delta, ifname);
+		return encode_json(k, v, expired, delta, ifname, drop);
+	return encode_logfmt(k, v, expired, delta, ifname, drop);
 }
 
 std::string SyslogExporter::frame(const std::string &message, const std::string &hostname,
@@ -261,13 +273,14 @@ std::string SyslogExporter::frame(const std::string &message, const std::string 
 	return out;
 }
 
-void SyslogExporter::emit(const FlowKey &k, const FlowValue &v, bool expired, const Delta *delta)
+void SyslogExporter::emit(const FlowKey &k, const FlowValue &v, bool expired, const Delta *delta,
+			  const DropInfo *drop)
 {
 	if (!enabled_)
 		return;
 
 	const std::string ifname = ifnames_ ? ifnames_(k.ifindex) : std::to_string(k.ifindex);
-	const std::string payload = encode(k, v, expired, delta, ifname, format_);
+	const std::string payload = encode(k, v, expired, delta, ifname, format_, drop);
 
 	if (local_) {
 		::syslog(LOG_INFO | LOG_DAEMON, "%s", payload.c_str());

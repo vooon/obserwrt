@@ -106,6 +106,24 @@ int main(int argc, char **argv)
 	v3.last_seen = now_ns;
 	ex.emit(k3, v3, true, nullptr);
 
+	/* IPv4 TCP drop record (netfilter drop -> forwardingStatus 130). */
+	obserwrt::FlowKey k4{};
+	k4.ifindex = 29;
+	k4.direction = obserwrt::INGRESS;
+	k4.family = 4;
+	k4.protocol = 6;
+	std::memcpy(k4.src, v4in6(192, 0, 2, 99).data(), 16);
+	std::memcpy(k4.dst, v4in6(198, 51, 100, 99).data(), 16);
+	k4.sport = 40000;
+	k4.dport = 22;
+	obserwrt::FlowValue v4{};
+	v4.packets = 1;
+	v4.bytes = 60;
+	v4.first_seen = now_ns;
+	v4.last_seen = now_ns;
+	v4.tcp_flags = 0x02;
+	ex.emit(k4, v4, false, nullptr, 130);
+
 	/* IPv6 UDP ingress, ifindex 30, 2001:db8::1 -> 2001:db8::2 */
 	obserwrt::FlowKey k2{};
 	k2.ifindex = 30;

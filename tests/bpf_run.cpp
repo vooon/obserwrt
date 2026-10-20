@@ -19,13 +19,20 @@
 #include <bpf/libbpf.h>
 #include <linux/bpf.h>
 
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include <vector>
 
 #include "bpf.hpp"
+#include "drop_reasons.hpp"
 #include "flow.hpp"
 
 static int g_failures = 0;
@@ -49,6 +56,9 @@ struct Ctx {
 	int flows = -1;
 	int stats = -1;
 	int devstats = -1;
+	int attached = -1;
+	int drops = -1;
+	struct bpf_program *drop_prog = nullptr;
 };
 
 int run(const Ctx &c, std::vector<uint8_t> &pkt, uint32_t gso_segs)
@@ -294,6 +304,91 @@ void test_read_flows(const Ctx &c)
 	}
 }
 
+/* A real kernel drop: UDP to a closed port on 127.0.0.1 is freed with
+ * SKB_DROP_REASON_NO_SOCKET on lo (ifindex 1, received there -> ingress).
+ * The tracer must record it with the 5-tuple and the raw reason, which the
+ * agent resolves by name from kernel BTF. */
+void test_drops(const Ctx &c)
+{
+	const uint32_t lo = 1;
+	const uint8_t one = 1;
+	if (bpf_map_update_elem(c.attached, &lo, &one, BPF_ANY) != 0) {
+		std::fprintf(stderr, "FAIL %s: attached map: %s\n", __func__, std::strerror(errno));
+		g_failures++;
+		return;
+	}
+	struct bpf_link *link = bpf_program__attach(c.drop_prog);
+	if (!link) {
+		std::fprintf(stderr, "FAIL %s: attach tp_btf: %s\n", __func__,
+			     std::strerror(errno));
+		g_failures++;
+		return;
+	}
+
+	/* Find a free port: bind, read it back, close (nothing listens after). */
+	sockaddr_in a{};
+	a.sin_family = AF_INET;
+	a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	socklen_t al = sizeof(a);
+	const int probe = socket(AF_INET, SOCK_DGRAM, 0);
+	bind(probe, reinterpret_cast<sockaddr *>(&a), sizeof(a));
+	getsockname(probe, reinterpret_cast<sockaddr *>(&a), &al);
+	close(probe);
+	const uint16_t port = ntohs(a.sin_port);
+
+	const int s = socket(AF_INET, SOCK_DGRAM, 0);
+	const char msg[32] = "obserwrt drop test";
+	for (int i = 0; i < 3; i++)
+		sendto(s, msg, sizeof(msg), 0, reinterpret_cast<sockaddr *>(&a), sizeof(a));
+	close(s);
+	usleep(100000);
+	bpf_link__destroy(link);
+
+	obserwrt::DropReasons reasons;
+	std::string err;
+	CHECK_EQ(reasons.load(&err), true);
+
+	std::vector<obserwrt::DropKey> keys;
+	std::vector<obserwrt::FlowValue> vals;
+	if (!obserwrt::drain_drops(c.drops, keys, vals)) {
+		std::fprintf(stderr, "FAIL %s: drain_drops: %s\n", __func__, std::strerror(errno));
+		g_failures++;
+		return;
+	}
+	bool found = false;
+	for (size_t i = 0; i < keys.size(); i++) {
+		const flow_key &k = keys[i].flow;
+		if (k.protocol != 17 || k.dport != port)
+			continue;
+		found = true;
+		CHECK_EQ(k.ifindex, 1);
+		CHECK_EQ(k.direction, OBSERWRT_INGRESS);
+		CHECK_EQ(k.family, 4);
+		CHECK_EQ(k.dst[15], 1); /* 127.0.0.1 */
+		CHECK_EQ(vals[i].packets, 3);
+		CHECK_EQ(vals[i].bytes, 3 * (20 + 8 + 32));
+		const auto r = reasons.lookup(keys[i].reason);
+		if (r.name != "NO_SOCKET") {
+			std::fprintf(stderr, "FAIL %s: reason %s, want NO_SOCKET\n", __func__,
+				     r.name.c_str());
+			g_failures++;
+		}
+	}
+	if (!found) {
+		std::fprintf(stderr, "FAIL %s: no drop record for udp/%u (%zu records)\n", __func__,
+			     port, keys.size());
+		g_failures++;
+	}
+
+	/* drained: a second pass sees nothing for this flow. */
+	obserwrt::drain_drops(c.drops, keys, vals);
+	for (const auto &k : keys)
+		if (k.flow.protocol == 17 && k.flow.dport == port) {
+			std::fprintf(stderr, "FAIL %s: drop map not drained\n", __func__);
+			g_failures++;
+		}
+}
+
 } /* namespace */
 
 int main(int argc, char **argv)
@@ -310,7 +405,9 @@ int main(int argc, char **argv)
 	struct bpf_program *prog;
 	bpf_object__for_each_program(prog, obj)
 	{
-		bpf_program__set_type(prog, BPF_PROG_TYPE_SCHED_CLS);
+		/* The TC classifiers only; the tp_btf drop tracer keeps its type. */
+		if (std::strncmp(bpf_program__section_name(prog), "classifier", 10) == 0)
+			bpf_program__set_type(prog, BPF_PROG_TYPE_SCHED_CLS);
 	}
 	if (bpf_object__load(obj) != 0) {
 		const int e = errno;
@@ -328,7 +425,11 @@ int main(int argc, char **argv)
 	c.flows = bpf_object__find_map_fd_by_name(obj, "obserwrt_flows");
 	c.stats = bpf_object__find_map_fd_by_name(obj, "obserwrt_stats");
 	c.devstats = bpf_object__find_map_fd_by_name(obj, "obserwrt_devstats");
-	if (c.ingress < 0 || c.flows < 0 || c.stats < 0 || c.devstats < 0) {
+	c.attached = bpf_object__find_map_fd_by_name(obj, "obserwrt_attached");
+	c.drops = bpf_object__find_map_fd_by_name(obj, "obserwrt_drops");
+	c.drop_prog = bpf_object__find_program_by_name(obj, "obserwrt_kfree_skb");
+	if (c.ingress < 0 || c.flows < 0 || c.stats < 0 || c.devstats < 0 || c.attached < 0 ||
+	    c.drops < 0 || !c.drop_prog) {
 		std::fprintf(stderr, "obserwrt-bpf.o: missing program/map\n");
 		bpf_object__close(obj);
 		return 2;
@@ -341,6 +442,7 @@ int main(int argc, char **argv)
 	test_lldp(c);
 	test_stats(c);
 	test_dev_counters(c);
+	test_drops(c);
 	test_read_flows(c);
 	bpf_object__close(obj);
 

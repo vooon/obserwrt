@@ -77,6 +77,7 @@ endif()
 
 add_library(obserwrt_core OBJECT
   src/bpf.cpp
+  src/drop_reasons.cpp
   src/cli.cpp
   src/exporter_ipfix.cpp
   ${OBSERWRT_CONFIG_SRC}

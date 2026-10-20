@@ -1,4 +1,5 @@
-/* obserwrt - TC classifier flow observation (P0/P1).
+/* SPDX-License-Identifier: GPL-2.0-only */
+/* obserwrt - TC classifier flow observation + drop tracing.
  *
  * Two TC classifier programs (ingress + egress) share one LRU hash map. For each
  * packet they parse the L3/L4 headers and aggregate a flow keyed by
@@ -29,6 +30,12 @@
  *
  * The map uses the final flow-key/value layouts (see docs/design.md §5); IPv4
  * addresses are stored as IPv4-mapped IPv6 ::ffff:a.b.c.d in the 16-byte fields.
+ *
+ * A tp_btf/kfree_skb program records packets the kernel DROPS on attached
+ * devices (obserwrt_drops, keyed by flow tuple + raw drop reason). It is
+ * loaded only when the agent enables drop tracking (§7.1). It reads the
+ * dropped packet's headers with bpf_probe_read_kernel, a GPL-only helper,
+ * hence the GPL license of this object.
  */
 #include <uapi/linux/bpf.h>
 #include <uapi/linux/types.h>
@@ -38,6 +45,7 @@
 #include <uapi/linux/ipv6.h>
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
+#include <bpf/bpf_core_read.h>
 
 /* Shared flow key/value layouts (docs/design.md §5) - the single owner of
  * the wire format, also included by the C++ agent (flow.hpp). */
@@ -53,6 +61,8 @@ enum {
 	STAT_BYTES,
 	STAT_FLOWS_CREATED,
 	STAT_PARSED,
+	STAT_DROPS,          /* drops on attached devices (tp_btf/kfree_skb) */
+	STAT_DROPS_UNPARSED, /* ... of which not IPv4/IPv6 or no network header */
 	STAT_MAX,
 };
 
@@ -95,6 +105,29 @@ struct {
 	__type(key, struct dev_key);
 	__type(value, struct dev_val);
 } obserwrt_devstats SEC(".maps");
+
+/* Attached ifindexes (agent-maintained): the drop tracer records only drops
+ * on observed devices. Value unused. */
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, DEV_MAP_ENTRIES);
+	__type(key, __u32);
+	__type(value, __u8);
+} obserwrt_attached SEC(".maps");
+
+/* Dropped packets, aggregated per flow tuple + raw reason; the agent drains
+ * it (lookup-and-delete) every lifecycle pass. LRU: a drop flood evicts
+ * rather than fails; obserwrt_stats STAT_DROPS stays exact. */
+#ifndef DROP_MAP_ENTRIES
+#define DROP_MAP_ENTRIES 2048
+#endif
+
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__uint(max_entries, DROP_MAP_ENTRIES);
+	__type(key, struct drop_key);
+	__type(value, struct flow_val);
+} obserwrt_drops SEC(".maps");
 
 /* --- helpers --------------------------------------------------------- */
 
@@ -474,4 +507,136 @@ int obserwrt_egress_l3(struct __sk_buff *skb)
 	return observe(skb, OBSERWRT_EGRESS, 0);
 }
 
-char LICENSE[] SEC("license") = "Apache-2.0";
+/* --- drop tracing --------------------------------------------------- */
+
+/* Minimal CO-RE views of kernel structs: libbpf relocates these field
+ * offsets against the running kernel's BTF at load (no vmlinux.h needed). */
+struct net_device {
+	int ifindex;
+} __attribute__((preserve_access_index));
+
+struct sk_buff {
+	struct net_device *dev;
+	unsigned int len;
+	int skb_iif;
+	__u16 protocol; /* __be16 */
+	__u16 network_header;
+	unsigned char *head;
+} __attribute__((preserve_access_index));
+
+/* Parse the dropped packet's L3/L4 headers from kernel memory into `dk`.
+ * Returns the L3 length (IP total length) or 0 if not parseable. Simpler
+ * than the TC parser on purpose: IPv6 extension headers are not walked (the
+ * next-header value is recorded as the protocol, ports 0). */
+static __always_inline __u32
+drop_parse(unsigned char *l3, __u16 proto, struct drop_key *dk, __u8 *tcpf)
+{
+	__u8 hdr[40];
+	__u8 l4[14];
+	__u32 l3len, ihl = 0;
+	__u8 ip_proto;
+	int have_l4 = 1;
+
+	if (proto == ETH_P_IP) {
+		if (bpf_probe_read_kernel(hdr, 20, l3) != 0 || (hdr[0] >> 4) != 4)
+			return 0;
+		ihl = (__u32)(hdr[0] & 0x0f) << 2;
+		if (ihl < 20)
+			return 0;
+		ip_proto = hdr[9];
+		dk->flow.family = 4;
+		ip4_to_in6(dk->flow.src, hdr + 12);
+		ip4_to_in6(dk->flow.dst, hdr + 16);
+		l3len = bpf_ntohs(*(__u16 *)(hdr + 2));
+		have_l4 = (bpf_ntohs(*(__u16 *)(hdr + 6)) & 0x1fff) == 0;
+	} else if (proto == ETH_P_IPV6) {
+		if (bpf_probe_read_kernel(hdr, 40, l3) != 0 || (hdr[0] >> 4) != 6)
+			return 0;
+		ihl = 40;
+		ip_proto = hdr[6];
+		dk->flow.family = 6;
+		__builtin_memcpy(dk->flow.src, hdr + 8, 16);
+		__builtin_memcpy(dk->flow.dst, hdr + 24, 16);
+		l3len = 40 + bpf_ntohs(*(__u16 *)(hdr + 4));
+	} else {
+		return 0;
+	}
+
+	dk->flow.protocol = ip_proto;
+	if (have_l4 && (ip_proto == 6 || ip_proto == 17 || ip_proto == 1 || ip_proto == 58) &&
+	    bpf_probe_read_kernel(l4, sizeof(l4), l3 + ihl) == 0) {
+		if (ip_proto == 6 || ip_proto == 17) {
+			dk->flow.sport = bpf_ntohs(*(__u16 *)l4);
+			dk->flow.dport = bpf_ntohs(*(__u16 *)(l4 + 2));
+			if (ip_proto == 6)
+				*tcpf = l4[13];
+		} else {
+			dk->flow.icmp_type = l4[0];
+			dk->flow.icmp_code = l4[1];
+		}
+	}
+	return l3len;
+}
+
+/* kfree_skb(skb, location, reason, ...): fires only for drops (normal frees
+ * go through consume_skb). Records drops whose skb device is attached.
+ * Direction: received on this device (skb_iif == dev) -> ingress, otherwise
+ * (forwarded out of / originated on it) -> egress. */
+SEC("tp_btf/kfree_skb")
+int obserwrt_kfree_skb(__u64 *ctx)
+{
+	struct sk_buff *skb = (struct sk_buff *)ctx[0];
+	__u32 reason = (__u32)ctx[2];
+	struct drop_key dk = { 0 };
+	struct flow_val *v;
+	struct net_device *dev;
+	unsigned char *head;
+	__u32 ifindex, l3len = 0;
+	__u16 nh, proto;
+	__u8 tcpf = 0;
+
+	dev = skb->dev;
+	if (!dev)
+		return 0;
+	ifindex = dev->ifindex;
+	if (!bpf_map_lookup_elem(&obserwrt_attached, &ifindex))
+		return 0;
+
+	stat_add(STAT_DROPS, 1);
+
+	head = skb->head;
+	nh = skb->network_header;
+	proto = bpf_ntohs(skb->protocol);
+	if (head && nh != (__u16)~0U)
+		l3len = drop_parse(head + nh, proto, &dk, &tcpf);
+	if (l3len == 0) {
+		stat_add(STAT_DROPS_UNPARSED, 1);
+		return 0;
+	}
+
+	dk.flow.ifindex = ifindex;
+	dk.flow.direction = skb->skb_iif == (int)ifindex ? OBSERWRT_INGRESS : OBSERWRT_EGRESS;
+	dk.reason = reason;
+
+	v = bpf_map_lookup_elem(&obserwrt_drops, &dk);
+	if (v) {
+		__sync_fetch_and_add(&v->packets, 1);
+		__sync_fetch_and_add(&v->bytes, l3len);
+		v->tcp_flags |= tcpf;
+		v->last_seen = bpf_ktime_get_ns();
+	} else {
+		struct flow_val nv = { 0 };
+		__u64 now = bpf_ktime_get_ns();
+
+		nv.packets = 1;
+		nv.bytes = l3len;
+		nv.first_seen = now;
+		nv.last_seen = now;
+		nv.tcp_flags = tcpf;
+		bpf_map_update_elem(&obserwrt_drops, &dk, &nv, BPF_ANY);
+	}
+	return 0;
+}
+
+/* GPL: the drop tracer needs bpf_probe_read_kernel (GPL-only helper). */
+char LICENSE[] SEC("license") = "GPL";
