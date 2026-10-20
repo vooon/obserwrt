@@ -136,8 +136,8 @@ build/obserwrt -c linux/obserwrt.conf
   exposition, and both config backends.
 - **eBPF test-run** (`tests/bpf_run.cpp`, `ctest`, needs root; skipped
   unprivileged): loads the real object and runs crafted frames through it via
-  `BPF_PROG_TEST_RUN` — framing, GSO/L3-octet counts, VLAN, IPv6 HBH, per-CPU
-  stats. Run: `sudo build/obserwrt-bpf-run build/obserwrt-bpf.o`
+  `BPF_PROG_TEST_RUN` — framing, GSO/L3-octet counts, VLAN, IPv6 HBH, per-device
+  classes, per-CPU stats. Run: `sudo build/obserwrt-bpf-run build/obserwrt-bpf.o`
 
 ## Conventions
 

@@ -416,6 +416,17 @@ two sources, split honestly between BPF truth and userspace:
   non-TCP/UDP/ICMP protocols), `obserwrt_flows_created_total` (new flow inserts).
   The `accounted/seen` ratio hence shows how much non-IP/unsupported traffic the
   observation point carries (useful on WAN/Ethernet; near 1 on AWG/L3).
+- **per-device counters, BPF truth** (`obserwrt_devstats` `PERCPU_HASH` keyed
+  by ifindex + direction, entries dropped on detach):
+  `obserwrt_device_packets_total` / `obserwrt_device_bytes_total`
+  `{ifname, direction, class}`, same units as above. `class` is `ipv4`, `ipv6`,
+  `arp` or `other`, taken from the EtherType after up to two VLAN tags on
+  Ethernet devices, or from the IP version nibble on L3 devices. The classes are
+  disjoint, so per device and direction they add up to everything seen there:
+  an ARP storm or a burst of non-IP frames (LLDP, PPPoE, …) on one interface is
+  a plain PromQL alert. IPv6 Neighbor Discovery is IPv6 here (it is also in the
+  flows as ICMPv6 type 133–137). Labels are per netdev, never per flow; the
+  counters restart from zero when a device is re-attached (counter reset).
 - **counters, userspace**: `obserwrt_flows_exported_total`, `obserwrt_export_errors_total`.
 - **gauges**: `obserwrt_flows_active`, `obserwrt_bpf_map_entries`,
   `obserwrt_bpf_map_limit` (baked to the built map size), `obserwrt_devices_attached`,
@@ -708,3 +719,4 @@ Fixes found by checking the live data in Akvorado:
 | Sampling | explicit `samplingInterval = 1` per record: the collector's default rate no longer scales unsampled counters |
 | VLAN | outer VID as flow-value enrichment (§4, §5.2), also in the syslog record |
 | Map walk | batched `BPF_MAP_LOOKUP_BATCH` read of keys + values; no restart under LRU churn, one syscall per batch instead of two per flow |
+| Device counters | `obserwrt_device_{packets,bytes}_total{ifname,direction,class}` (ipv4/ipv6/arp/other), §9 |

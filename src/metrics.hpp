@@ -15,9 +15,16 @@
 #include <vector>
 
 #include "config.hpp"
+#include "flow.hpp"
 
 namespace obserwrt
 {
+
+/* Class counters of one attached device/direction, labelled by netdev name. */
+struct DeviceCounters {
+	std::string ifname;
+	DevCounters c;
+};
 
 class Metrics
 {
@@ -47,6 +54,9 @@ class Metrics
 	void set_bpf(unsigned long long packets, unsigned long long bytes,
 		     unsigned long long accounted, unsigned long long flows_created);
 
+	/* Per-device packet-class counters (obserwrt_device_{packets,bytes}_total). */
+	void set_devices(std::vector<DeviceCounters> devices);
+
 	/* Real flow-map capacity from bpf_map_info (design §16 v0.3). */
 	void set_map_limit(uint32_t limit);
 
@@ -68,6 +78,7 @@ class Metrics
 	unsigned long long bpf_flows_created_ = 0;
 	uint32_t map_limit_ = 0;
 	std::vector<std::string> devices_;
+	std::vector<DeviceCounters> dev_counters_;
 };
 
 } /* namespace obserwrt */

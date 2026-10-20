@@ -61,6 +61,8 @@ class Bpf
 	/* Self-observability. */
 	uint32_t map_limit() const;	       /* bpf_map_info.max_entries */
 	void bpf_stats(uint64_t out[4]) const; /* packets, bytes, flows_created, parsed */
+	/* Per-device/direction packet-class counters (obserwrt_devstats). */
+	bool dev_counters(std::vector<DevCounters> &out) const;
 
 	const std::string &last_error() const
 	{
@@ -76,12 +78,20 @@ class Bpf
 	bpf_object *obj_ = nullptr;
 	bpf_map *flows_ = nullptr;
 	bpf_map *stats_ = nullptr;
+	bpf_map *devstats_ = nullptr;
 	/* [0] = L3 framing, [1] = Ethernet framing */
 	bpf_program *prog_ingress_[2] = {};
 	bpf_program *prog_egress_[2] = {};
 	std::map<uint32_t, Links> atts_; /* ifindex -> live tcx links */
 	std::string last_error_;
+
+	/* Delete a device's class counters (both directions). */
+	void drop_dev_counters(uint32_t ifindex) const;
 };
+
+/* Read the per-CPU device class counters map (fd), summed over CPUs. False
+ * on a map error; an empty map is success. Exposed for tests/bpf_run.cpp. */
+bool read_dev_counters(int fd, std::vector<DevCounters> &out);
 
 /* Read a whole flow map (fd) with BPF_MAP_LOOKUP_BATCH into parallel
  * key/value vectors. False on a map error; an empty map is success. Exposed

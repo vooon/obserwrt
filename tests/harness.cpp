@@ -16,9 +16,12 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <linux/if_arp.h>
 #include <map>
+#include <sstream>
 #include <string>
+#include <unistd.h>
 #include <vector>
 
 #include "config.hpp"
@@ -26,6 +29,7 @@
 #include "exporter_syslog.hpp"
 #include "flow.hpp"
 #include "lifecycle.hpp"
+#include "metrics.hpp"
 #include "prometheus.hpp"
 #include "reconcile.hpp"
 
@@ -641,6 +645,54 @@ static void test_prometheus()
 	      s.find("obserwrt_build_info{version"));
 }
 
+/* Per-device class counters in the textfile: one series per device,
+ * direction and class, each family's samples contiguous. */
+static void test_device_metrics()
+{
+	char dir[] = "/tmp/obserwrt-harness-XXXXXX";
+	if (!mkdtemp(dir)) {
+		std::fprintf(stderr, "FAIL %s: mkdtemp\n", __func__);
+		g_failures++;
+		return;
+	}
+	obserwrt::Config cfg;
+	cfg.prometheus_textfile = std::string(dir) + "/obserwrt.prom";
+
+	obserwrt::Metrics m;
+	m.init(cfg);
+	obserwrt::DeviceCounters d{};
+	d.ifname = "eth0";
+	d.c.ifindex = 2;
+	d.c.direction = obserwrt::INGRESS;
+	d.c.packets[OBSERWRT_CLASS_IPV4] = 100;
+	d.c.packets[OBSERWRT_CLASS_ARP] = 7;
+	d.c.bytes[OBSERWRT_CLASS_ARP] = 420;
+	obserwrt::DeviceCounters e = d;
+	e.c.direction = obserwrt::EGRESS;
+	m.set_devices({d, e});
+	m.write();
+
+	std::ifstream f(cfg.prometheus_textfile);
+	std::stringstream ss;
+	ss << f.rdbuf();
+	const std::string s = ss.str();
+	unlink(cfg.prometheus_textfile.c_str());
+	rmdir(dir);
+
+	CHECK(s.find("obserwrt_device_packets_total{ifname=\"eth0\",direction=\"ingress\","
+		     "class=\"ipv4\"} 100\n") != std::string::npos);
+	CHECK(s.find("obserwrt_device_packets_total{ifname=\"eth0\",direction=\"egress\","
+		     "class=\"arp\"} 7\n") != std::string::npos);
+	CHECK(s.find("obserwrt_device_bytes_total{ifname=\"eth0\",direction=\"ingress\","
+		     "class=\"arp\"} 420\n") != std::string::npos);
+	CHECK(s.find("obserwrt_device_packets_total{ifname=\"eth0\",direction=\"ingress\","
+		     "class=\"other\"} 0\n") != std::string::npos);
+	/* 2 directions x 4 classes per family; families not interleaved. */
+	CHECK_EQ(count_occ(s, "obserwrt_device_packets_total{"), (size_t)8);
+	CHECK_EQ(count_occ(s, "obserwrt_device_bytes_total{"), (size_t)8);
+	CHECK(s.rfind("obserwrt_device_packets_total{") < s.find("obserwrt_device_bytes_total{"));
+}
+
 /* Framing is chosen per device at attach time: Ethernet-framed link types get
  * the *_eth programs, everything else (AWG, ip6gre/FOU, tun, PPP) *_l3. */
 static void test_link_framing()
@@ -662,6 +714,7 @@ int main()
 	test_syslog_export();
 	test_config_mini();
 	test_prometheus();
+	test_device_metrics();
 	test_link_framing();
 
 	if (g_failures != 0) {

@@ -55,7 +55,32 @@ struct flow_val {
 	__u16 vlan_id;    /* 34: outer 802.1Q/ad VID of the first packet, 0 = untagged */
 };
 
+/* Per-device packet classes (obserwrt_devstats, §9). Classes are disjoint by
+ * EtherType (Ethernet) or IP version nibble (L3 devices), so per device and
+ * direction they add up to everything the TC filter saw. */
+#define OBSERWRT_CLASS_IPV4 0
+#define OBSERWRT_CLASS_IPV6 1
+#define OBSERWRT_CLASS_ARP 2
+#define OBSERWRT_CLASS_OTHER 3
+#define OBSERWRT_CLASS_MAX 4
+
+/* Per-device counters key (8 bytes). */
+struct dev_key {
+	__u32 ifindex;   /* 0 */
+	__u8  direction; /* 4 */
+	__u8  pad[3];    /* 5: zero */
+};
+
+/* Per-device counters value (64 bytes, per CPU): GSO-aware packets and
+ * skb->len bytes (link layer included), indexed by OBSERWRT_CLASS_*. */
+struct dev_val {
+	__u64 packets[OBSERWRT_CLASS_MAX]; /*  0 */
+	__u64 bytes[OBSERWRT_CLASS_MAX];   /* 32 */
+};
+
 OBSERWRT_FLOW_ASSERT(sizeof(struct flow_key) == 46);
 OBSERWRT_FLOW_ASSERT(sizeof(struct flow_val) == 40);
+OBSERWRT_FLOW_ASSERT(sizeof(struct dev_key) == 8);
+OBSERWRT_FLOW_ASSERT(sizeof(struct dev_val) == 64);
 
 #endif /* OBSERWRT_FLOW_H */

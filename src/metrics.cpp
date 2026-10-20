@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <utility>
 
 #include "prometheus.hpp"
 #include "version.hpp"
@@ -69,6 +70,13 @@ void Metrics::set_bpf(unsigned long long packets, unsigned long long bytes,
 	bpf_flows_created_ = flows_created;
 }
 
+void Metrics::set_devices(std::vector<DeviceCounters> devices)
+{
+	if (!active_)
+		return;
+	dev_counters_ = std::move(devices);
+}
+
 void Metrics::set_map_limit(uint32_t limit)
 {
 	if (!active_)
@@ -113,6 +121,28 @@ void Metrics::write()
 	for (const auto &d : devices_)
 		px.gauge("obserwrt_device_attached", "Attached netdev (1 if attached).",
 			 PromExposition::labels({{"ifname", d.c_str()}}), 1);
+
+	/* Per-device split of what TC saw: the classes are disjoint, so per
+	 * device+direction they sum to everything seen there. One loop per
+	 * family keeps each family's samples contiguous. */
+	static constexpr const char *CLASSES[OBSERWRT_CLASS_MAX] = {"ipv4", "ipv6", "arp", "other"};
+	const auto dev_labels = [](const DeviceCounters &d, int cls) {
+		return PromExposition::labels({
+		    {"ifname", d.ifname.c_str()},
+		    {"direction", d.c.direction == INGRESS ? "ingress" : "egress"},
+		    {"class", CLASSES[cls]},
+		});
+	};
+	for (const auto &d : dev_counters_)
+		for (int cls = 0; cls < OBSERWRT_CLASS_MAX; cls++)
+			px.counter("obserwrt_device_packets_total",
+				   "Packets seen at TC per device, direction and class.",
+				   dev_labels(d, cls), d.c.packets[cls]);
+	for (const auto &d : dev_counters_)
+		for (int cls = 0; cls < OBSERWRT_CLASS_MAX; cls++)
+			px.counter("obserwrt_device_bytes_total",
+				   "Bytes seen at TC per device, direction and class.",
+				   dev_labels(d, cls), d.c.bytes[cls]);
 
 	const std::string &out = px.str();
 
