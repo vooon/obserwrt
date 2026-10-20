@@ -51,8 +51,9 @@ class Bpf
 	bool attached(uint32_t ifindex) const;
 
 	/* Flow-map element access (native §5 structs - the map layout IS the key/
-	 * value POD from bpf/obserwrt-flow.h). */
-	bool snapshot_keys(std::vector<FlowKey> &out) const;
+	 * value POD from bpf/obserwrt-flow.h). snapshot() reads every entry in
+	 * one batched walk (see read_flows()). */
+	bool snapshot(std::vector<FlowKey> &keys, std::vector<FlowValue> &values) const;
 	bool lookup(const FlowKey &key, FlowValue &value) const;
 	bool erase(const FlowKey &key) const;
 	void purge_ifindex(uint32_t ifindex);
@@ -82,9 +83,14 @@ class Bpf
 	std::string last_error_;
 };
 
-/* FlowMap adapter over a loaded Bpf: snapshots the current keys per pass
- * (the libbpf walk semantics the lifecycle/harness MemMap mirror), then
- * get/delete per key so in-pass removal is safe. */
+/* Read a whole flow map (fd) with BPF_MAP_LOOKUP_BATCH into parallel
+ * key/value vectors. False on a map error; an empty map is success. Exposed
+ * for the eBPF test-run (tests/bpf_run.cpp). */
+bool read_flows(int fd, std::vector<FlowKey> &keys, std::vector<FlowValue> &values);
+
+/* FlowMap adapter over a loaded Bpf: snapshots keys and values per pass in
+ * one batched walk, then serves get() from that snapshot; delete per key so
+ * in-pass removal is safe. */
 class BpfFlowMap : public FlowMap
 {
       public:
@@ -99,7 +105,8 @@ class BpfFlowMap : public FlowMap
 
       private:
 	const Bpf *b_;
-	std::vector<FlowKey> snapshot_;
+	std::vector<FlowKey> keys_;
+	std::vector<FlowValue> values_;
 	size_t pos_ = 0;
 };
 

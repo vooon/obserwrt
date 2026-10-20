@@ -2,9 +2,8 @@
  * obserwrt - libbpf flow-map + TC attach (bpf.cpp)
  *
  * libbpf 1.x lives here only; nothing else in the daemon touches the bpf
- * module. Flow-map keys/values are the raw §5 bytes; iteration snapshots the
- * current keys per pass (bpf_map__get_next_key), matching the lifecycle's
- * "LRU eviction between iteration and read" semantics.
+ * module. Flow-map keys/values are the raw §5 bytes; each pass snapshots the
+ * whole map (keys AND values) with BPF_MAP_LOOKUP_BATCH.
  */
 
 #include "bpf.hpp"
@@ -15,7 +14,6 @@
 
 #include <cerrno>
 #include <cstring>
-#include <unordered_set>
 
 namespace obserwrt
 {
@@ -170,45 +168,55 @@ bool Bpf::attached(uint32_t ifindex) const
 	return it != atts_.end() && it->second.in && it->second.eg;
 }
 
-bool Bpf::snapshot_keys(std::vector<FlowKey> &out) const
+bool read_flows(int fd, std::vector<FlowKey> &keys, std::vector<FlowValue> &values)
 {
-	out.clear();
-	if (!flows_)
-		return false;
+	keys.clear();
+	values.clear();
 
-	const size_t cap = bpf_map__max_entries(flows_);
-	int fd = bpf_map__fd(flows_);
-
-	FlowKey prev = {};
-	FlowKey next = {};
+	/* The hash-map batch walk advances bucket by bucket (the token is a u32
+	 * bucket index), so LRU eviction during the walk cannot restart it the
+	 * way a vanished get_next_key() cursor does: every key that stays in the
+	 * map is visited once, and the walk always terminates. */
+	std::vector<FlowKey> kb(256);
+	std::vector<FlowValue> vb(kb.size());
+	uint32_t in_batch = 0;
+	uint32_t out_batch = 0;
 	bool first = true;
-
-	/* The map is an LRU that may evict BETWEEN get_next_key() calls. When the
-	 * cursor key vanished, the kernel restarts iteration from the first key,
-	 * so a plain loop would accumulate duplicates and never terminate under
-	 * sustained churn. Bound it: never collect more than the map capacity,
-	 * and stop as soon as a key repeats (iteration restarted). FlowKey is
-	 * packed (46 B), so byte-wise equality via the set is exact. */
-	std::unordered_set<FlowKey, FlowKeyHash> seen;
+	LIBBPF_OPTS(bpf_map_batch_opts, opts);
 
 	for (;;) {
-		if (seen.size() >= cap)
-			return true;
+		auto count = static_cast<uint32_t>(kb.size());
+		const int r = bpf_map_lookup_batch(fd, first ? nullptr : &in_batch, &out_batch,
+						   kb.data(), vb.data(), &count, &opts);
+		const int e = r != 0 ? errno : 0;
 
-		const void *cur = first ? nullptr : &prev;
-		if (bpf_map_get_next_key(fd, cur, &next) != 0) {
-			if (errno == ENOENT) /* end of map */
-				return true;
-			return false;
+		if (e == ENOSPC && count == 0) {
+			/* One bucket holds more entries than the buffer: grow. */
+			kb.resize(kb.size() * 2);
+			vb.resize(kb.size());
+			continue;
 		}
+		if (e != 0 && e != ENOENT)
+			return false;
 
-		if (!seen.insert(next).second)
-			return true; /* cursor evicted -> kernel restarted; we are done */
+		keys.insert(keys.end(), kb.begin(), kb.begin() + count);
+		values.insert(values.end(), vb.begin(), vb.begin() + count);
 
-		out.push_back(next);
-		prev = next;
+		if (e == ENOENT) /* walked past the last bucket */
+			return true;
+		in_batch = out_batch;
 		first = false;
 	}
+}
+
+bool Bpf::snapshot(std::vector<FlowKey> &keys, std::vector<FlowValue> &values) const
+{
+	if (!flows_) {
+		keys.clear();
+		values.clear();
+		return false;
+	}
+	return read_flows(bpf_map__fd(flows_), keys, values);
 }
 
 bool Bpf::lookup(const FlowKey &key, FlowValue &value) const
@@ -230,7 +238,8 @@ bool Bpf::erase(const FlowKey &key) const
 void Bpf::purge_ifindex(uint32_t ifindex)
 {
 	std::vector<FlowKey> keys;
-	if (!snapshot_keys(keys))
+	std::vector<FlowValue> values;
+	if (!snapshot(keys, values))
 		return;
 	for (const FlowKey &k : keys) {
 		if (k.ifindex == ifindex)
@@ -270,22 +279,29 @@ void Bpf::bpf_stats(uint64_t out[4]) const
 
 void BpfFlowMap::reset()
 {
-	snapshot_.clear();
+	keys_.clear();
+	values_.clear();
 	pos_ = 0;
 	if (b_)
-		b_->snapshot_keys(snapshot_);
+		b_->snapshot(keys_, values_);
 }
 
 bool BpfFlowMap::next_key(FlowKey &key)
 {
-	if (pos_ >= snapshot_.size())
+	if (pos_ >= keys_.size())
 		return false;
-	key = snapshot_[pos_++];
+	key = keys_[pos_++];
 	return true;
 }
 
 bool BpfFlowMap::get(const FlowKey &key, FlowValue &value)
 {
+	/* The usual case: the value of the key just handed out, read in the
+	 * same batch. Anything else falls back to a single lookup. */
+	if (pos_ > 0 && keys_[pos_ - 1] == key) {
+		value = values_[pos_ - 1];
+		return true;
+	}
 	return b_->lookup(key, value);
 }
 

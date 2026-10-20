@@ -300,7 +300,7 @@ int main(int argc, char **argv)
 					bool expired, const obserwrt::Delta &delta) {
 					    metrics.observe();
 					    if (cfg.ipfix.enabled)
-						    ipfix.emit(k, v, &delta);
+						    ipfix.emit(k, v, expired, &delta);
 					    if (syslog_active)
 						    syslog.emit(k, v, expired, &delta);
 				    });
