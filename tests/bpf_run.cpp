@@ -48,6 +48,7 @@ struct Ctx {
 	int ingress = -1;
 	int flows = -1;
 	int stats = -1;
+	int devstats = -1;
 };
 
 int run(const Ctx &c, std::vector<uint8_t> &pkt, uint32_t gso_segs)
@@ -216,8 +217,17 @@ void test_arp(const Ctx &c)
 	run(c, p, 0);
 }
 
-/* PERCPU_ARRAY slots summed over CPUs: 10 + 1 + 1 + 1 packets seen,
- * the ARP frame not accounted, three flows created. */
+/* A non-IP, non-ARP frame (LLDP): seen, class "other", not accounted. */
+void test_lldp(const Ctx &c)
+{
+	const uint8_t lldp[6] = {0x01, 0x80, 0xc2, 0x00, 0x00, 0x0e};
+	std::vector<uint8_t> p = eth(lldp, 0x88cc);
+	p.resize(p.size() + 50);
+	run(c, p, 0);
+}
+
+/* PERCPU_ARRAY slots summed over CPUs: 10 + 1 + 1 + 1 + 1 packets seen,
+ * the ARP and LLDP frames not accounted, three flows created. */
 void test_stats(const Ctx &c)
 {
 	const int ncpu = libbpf_num_possible_cpus();
@@ -229,9 +239,35 @@ void test_stats(const Ctx &c)
 		for (const uint64_t s : slots)
 			sum[i] += s;
 	}
-	CHECK_EQ(sum[STAT_PACKETS], 13);
+	CHECK_EQ(sum[STAT_PACKETS], 14);
 	CHECK_EQ(sum[STAT_PARSED], 12);
 	CHECK_EQ(sum[STAT_FLOWS_CREATED], 3);
+}
+
+/* Per-device class counters: all frames ran as ingress on ifindex 1. IPv4 =
+ * the 10-segment GSO frame + the VLAN-tagged one (classed by the inner
+ * EtherType); classes add up to the 14 packets seen. */
+void test_dev_counters(const Ctx &c)
+{
+	std::vector<obserwrt::DevCounters> devs;
+	if (!obserwrt::read_dev_counters(c.devstats, devs)) {
+		std::fprintf(stderr, "FAIL %s: read_dev_counters: %s\n", __func__,
+			     std::strerror(errno));
+		g_failures++;
+		return;
+	}
+	CHECK_EQ(devs.size(), 1);
+	if (devs.empty())
+		return;
+	const obserwrt::DevCounters &d = devs[0];
+	CHECK_EQ(d.ifindex, 1);
+	CHECK_EQ(d.direction, OBSERWRT_INGRESS);
+	CHECK_EQ(d.packets[OBSERWRT_CLASS_IPV4], 11);
+	CHECK_EQ(d.packets[OBSERWRT_CLASS_IPV6], 1);
+	CHECK_EQ(d.packets[OBSERWRT_CLASS_ARP], 1);
+	CHECK_EQ(d.packets[OBSERWRT_CLASS_OTHER], 1);
+	CHECK_EQ(d.bytes[OBSERWRT_CLASS_ARP], 14 + 28);
+	CHECK_EQ(d.bytes[OBSERWRT_CLASS_OTHER], 14 + 50);
 }
 
 /* The agent's batched map walk returns every flow with its value. */
@@ -291,7 +327,8 @@ int main(int argc, char **argv)
 	c.ingress = bpf_program__fd(bpf_object__find_program_by_name(obj, "obserwrt_ingress_eth"));
 	c.flows = bpf_object__find_map_fd_by_name(obj, "obserwrt_flows");
 	c.stats = bpf_object__find_map_fd_by_name(obj, "obserwrt_stats");
-	if (c.ingress < 0 || c.flows < 0 || c.stats < 0) {
+	c.devstats = bpf_object__find_map_fd_by_name(obj, "obserwrt_devstats");
+	if (c.ingress < 0 || c.flows < 0 || c.stats < 0 || c.devstats < 0) {
 		std::fprintf(stderr, "obserwrt-bpf.o: missing program/map\n");
 		bpf_object__close(obj);
 		return 2;
@@ -301,7 +338,9 @@ int main(int argc, char **argv)
 	test_vlan_udp(c);
 	test_ipv6_hbh(c);
 	test_arp(c);
+	test_lldp(c);
 	test_stats(c);
+	test_dev_counters(c);
 	test_read_flows(c);
 	bpf_object__close(obj);
 

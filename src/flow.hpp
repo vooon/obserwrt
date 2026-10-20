@@ -59,6 +59,15 @@ struct FlowKeyHash {
 	}
 };
 
+/* One device/direction's packet-class counters, summed over CPUs (§9).
+ * Indexed by OBSERWRT_CLASS_* (bpf/obserwrt-flow.h). */
+struct DevCounters {
+	uint32_t ifindex;
+	uint8_t direction;
+	uint64_t packets[OBSERWRT_CLASS_MAX];
+	uint64_t bytes[OBSERWRT_CLASS_MAX];
+};
+
 /* Interval growth handed to exporters by the lifecycle (active-flow delta
  * accounting) - the cumulative counters in FlowValue are NOT re-sent; only
  * the growth since the last export + the explicit value fields are. */

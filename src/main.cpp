@@ -25,6 +25,7 @@
 #include <cstring>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "bpf.hpp"
@@ -314,6 +315,17 @@ int main(int argc, char **argv)
 				    "expired", st.expired)("map", st.map);
 				metrics.set_state(st.active, st.map, attached_names);
 				metrics.set_bpf(stat[0], stat[1], stat[3], stat[2]);
+				if (metrics.active()) {
+					std::vector<obserwrt::DevCounters> raw;
+					std::vector<obserwrt::DeviceCounters> devs;
+					bpf.dev_counters(raw);
+					for (const auto &c : raw) {
+						const auto it = name_by_index.find(c.ifindex);
+						if (it != name_by_index.end())
+							devs.push_back({it->second, c});
+					}
+					metrics.set_devices(std::move(devs));
+				}
 			} else if (f == t_meter) {
 				drain_timer(t_meter);
 				metrics.write();

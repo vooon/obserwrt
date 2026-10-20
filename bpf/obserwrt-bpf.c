@@ -24,6 +24,8 @@
  * A PERCPU_ARRAY map `obserwrt_stats` tracks aggregate packets/bytes/flow
  * creations exactly (independent of LRU eviction) for Prometheus counters;
  * per-CPU slots keep the hot path free of shared atomics (the agent sums).
+ * A PERCPU_HASH `obserwrt_devstats` splits what was seen per device and
+ * direction into packet classes (IPv4/IPv6/ARP/other).
  *
  * The map uses the final flow-key/value layouts (see docs/design.md §5); IPv4
  * addresses are stored as IPv4-mapped IPv6 ::ffff:a.b.c.d in the 16-byte fields.
@@ -80,6 +82,20 @@ struct {
 	__type(value, __u64);
 } obserwrt_stats SEC(".maps");
 
+/* Per-device, per-direction packet-class counters (§9). Two entries per
+ * attached device; the agent deletes them on detach, so the map tracks
+ * attached incarnations only. */
+#ifndef DEV_MAP_ENTRIES
+#define DEV_MAP_ENTRIES 1024
+#endif
+
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_HASH);
+	__uint(max_entries, DEV_MAP_ENTRIES);
+	__type(key, struct dev_key);
+	__type(value, struct dev_val);
+} obserwrt_devstats SEC(".maps");
+
 /* --- helpers --------------------------------------------------------- */
 
 static inline void
@@ -89,6 +105,77 @@ stat_add(__u32 idx, __u64 n)
 
 	if (c)
 		*c += n;   /* per-CPU slot: no atomic needed */
+}
+
+/* Packet class (OBSERWRT_CLASS_*): EtherType after up to two VLAN tags on
+ * Ethernet, the IP version nibble on L3 devices. Deliberately separate from
+ * the flow parser (a few re-read bytes) so the class does not add verifier
+ * states to the parser's IPv6 extension-header walk. */
+static __always_inline __u32
+pkt_class(struct __sk_buff *skb, const int eth)
+{
+	__u8 *data = (__u8 *)(__u64)skb->data;
+	__u8 *data_end = (__u8 *)(__u64)skb->data_end;
+	__u16 et;
+
+	if (!eth) {
+		if (data + 1 > data_end)
+			return OBSERWRT_CLASS_OTHER;
+		if ((data[0] >> 4) == 4)
+			return OBSERWRT_CLASS_IPV4;
+		if ((data[0] >> 4) == 6)
+			return OBSERWRT_CLASS_IPV6;
+		return OBSERWRT_CLASS_OTHER;
+	}
+
+	if (data + 14 > data_end)
+		return OBSERWRT_CLASS_OTHER;
+	et = bpf_ntohs(*(__u16 *)(data + 12));
+	if (et == ETH_P_8021Q || et == ETH_P_8021AD || et == 0x9100) {
+		if (data + 18 > data_end)
+			return OBSERWRT_CLASS_OTHER;
+		et = bpf_ntohs(*(__u16 *)(data + 16));
+		if (et == ETH_P_8021Q || et == ETH_P_8021AD) {
+			if (data + 22 > data_end)
+				return OBSERWRT_CLASS_OTHER;
+			et = bpf_ntohs(*(__u16 *)(data + 20));
+		}
+	}
+
+	if (et == ETH_P_IP)
+		return OBSERWRT_CLASS_IPV4;
+	if (et == ETH_P_IPV6)
+		return OBSERWRT_CLASS_IPV6;
+	if (et == ETH_P_ARP)
+		return OBSERWRT_CLASS_ARP;
+	return OBSERWRT_CLASS_OTHER;
+}
+
+/* Add one (GSO-aware) packet to its device/direction/class counters. */
+static __always_inline void
+dev_count(struct __sk_buff *skb, __u8 direction, __u32 cls, __u32 segs)
+{
+	struct dev_key k = { 0 };
+	struct dev_val *v;
+
+	k.ifindex = skb->ifindex;
+	k.direction = direction;
+
+	v = bpf_map_lookup_elem(&obserwrt_devstats, &k);
+	if (!v) {
+		struct dev_val z = { 0 };
+
+		/* first packet of this device/direction: insert, then re-read
+		 * (another CPU may have inserted it concurrently - fine). */
+		bpf_map_update_elem(&obserwrt_devstats, &k, &z, BPF_NOEXIST);
+		v = bpf_map_lookup_elem(&obserwrt_devstats, &k);
+		if (!v)
+			return;
+	}
+
+	cls &= OBSERWRT_CLASS_MAX - 1;   /* bound for the verifier */
+	v->packets[cls] += segs;       /* per-CPU slot: no atomic needed */
+	v->bytes[cls] += skb->len;
 }
 
 /* Store a 4-byte IPv4 address as IPv4-mapped IPv6 (::ffff:a.b.c.d). */
@@ -177,6 +264,7 @@ observe(struct __sk_buff *skb, __u8 direction, const int eth)
 
 	stat_add(STAT_PACKETS, segs);
 	stat_add(STAT_BYTES, skb->len);
+	dev_count(skb, direction, pkt_class(skb, eth), segs);
 
 	if (data + 2 > data_end)
 		return TC_ACT_OK;

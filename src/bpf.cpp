@@ -63,14 +63,15 @@ bool Bpf::load(const std::string &path, uint32_t max_flows, std::string *err)
 
 	flows_ = bpf_object__find_map_by_name(obj_, "obserwrt_flows");
 	stats_ = bpf_object__find_map_by_name(obj_, "obserwrt_stats");
+	devstats_ = bpf_object__find_map_by_name(obj_, "obserwrt_devstats");
 	prog_ingress_[0] = bpf_object__find_program_by_name(obj_, "obserwrt_ingress_l3");
 	prog_egress_[0] = bpf_object__find_program_by_name(obj_, "obserwrt_egress_l3");
 	prog_ingress_[1] = bpf_object__find_program_by_name(obj_, "obserwrt_ingress_eth");
 	prog_egress_[1] = bpf_object__find_program_by_name(obj_, "obserwrt_egress_eth");
-	if (!flows_ || !stats_ || !prog_ingress_[0] || !prog_egress_[0] || !prog_ingress_[1] ||
-	    !prog_egress_[1]) {
+	if (!flows_ || !stats_ || !devstats_ || !prog_ingress_[0] || !prog_egress_[0] ||
+	    !prog_ingress_[1] || !prog_egress_[1]) {
 		if (err)
-			*err = "obserwrt-bpf.o: missing map/program (flows/stats/"
+			*err = "obserwrt-bpf.o: missing map/program (flows/stats/devstats/"
 			       "{ingress,egress}_{l3,eth})";
 		bpf_object__close(obj_);
 		obj_ = nullptr;
@@ -123,6 +124,11 @@ bool Bpf::attach(uint32_t ifindex, bool ethernet, std::string *err)
 	if (l.in && l.eg)
 		return true;
 
+	/* A new attachment starts its class counters from zero (the ifindex may
+	 * be a reused one whose old entries were not dropped). */
+	if (!l.in && !l.eg)
+		drop_dev_counters(ifindex);
+
 	if (!l.in) {
 		l.in = bpf_program__attach_tcx(prog_ingress_[ethernet], static_cast<int>(ifindex),
 					       nullptr);
@@ -160,6 +166,61 @@ void Bpf::detach(uint32_t ifindex)
 		bpf_link__destroy(l.eg);
 		l.eg = nullptr;
 	}
+	drop_dev_counters(ifindex);
+}
+
+void Bpf::drop_dev_counters(uint32_t ifindex) const
+{
+	if (!devstats_)
+		return;
+	for (const uint8_t dir : {static_cast<uint8_t>(INGRESS), static_cast<uint8_t>(EGRESS)}) {
+		struct dev_key k = {};
+		k.ifindex = ifindex;
+		k.direction = dir;
+		bpf_map__delete_elem(devstats_, &k, sizeof(k), 0); /* ENOENT is fine */
+	}
+}
+
+bool read_dev_counters(int fd, std::vector<DevCounters> &out)
+{
+	out.clear();
+
+	/* PERCPU_HASH: one dev_val per possible CPU, summed here. A plain
+	 * get_next_key walk is fine: the map is small and never evicts. */
+	const int ncpu = libbpf_num_possible_cpus();
+	if (ncpu <= 0)
+		return false;
+	std::vector<struct dev_val> slots(static_cast<size_t>(ncpu));
+
+	struct dev_key cur = {};
+	struct dev_key next = {};
+	bool first = true;
+	while (bpf_map_get_next_key(fd, first ? nullptr : &cur, &next) == 0) {
+		first = false;
+		cur = next;
+		if (bpf_map_lookup_elem(fd, &next, slots.data()) != 0)
+			continue; /* deleted between the two calls (detach) */
+		DevCounters d = {};
+		d.ifindex = next.ifindex;
+		d.direction = next.direction;
+		for (const struct dev_val &v : slots) {
+			for (int c = 0; c < OBSERWRT_CLASS_MAX; c++) {
+				d.packets[c] += v.packets[c];
+				d.bytes[c] += v.bytes[c];
+			}
+		}
+		out.push_back(d);
+	}
+	return errno == ENOENT;
+}
+
+bool Bpf::dev_counters(std::vector<DevCounters> &out) const
+{
+	if (!devstats_) {
+		out.clear();
+		return false;
+	}
+	return read_dev_counters(bpf_map__fd(devstats_), out);
 }
 
 bool Bpf::attached(uint32_t ifindex) const
