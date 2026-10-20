@@ -36,9 +36,9 @@ class Bpf
 
 	/* Open the object, set the SCHED_CLS/TCX program types, size the flow map
 	 * (`max_flows` == 0 keeps the baked-in default) and load. With
-	 * `enable_drops`, also load + attach the tp_btf/kfree_skb drop tracer; if
+	 * `track_drops`, also load + attach the tp_btf/kfree_skb drop tracer; if
 	 * that fails, flow collection still loads and `*warn` says why. */
-	bool load(const std::string &object_path, uint32_t max_flows, bool enable_drops,
+	bool load(const std::string &object_path, uint32_t max_flows, bool track_drops,
 		  std::string *err, std::string *warn = nullptr);
 
 	/* True when the drop tracer is loaded and attached. */
