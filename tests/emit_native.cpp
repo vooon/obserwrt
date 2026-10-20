@@ -87,7 +87,24 @@ int main(int argc, char **argv)
 	v1.first_seen = now_ns - 5000000000ULL;
 	v1.last_seen = now_ns;
 	v1.tcp_flags = 0x18;
-	ex.emit(k1, v1, nullptr);
+	v1.vlan_id = 100;
+	ex.emit(k1, v1, false, nullptr);
+
+	/* IPv4 ICMP echo request (8/0) ingress, ifindex 29: icmpTypeCodeIPv4. */
+	obserwrt::FlowKey k3{};
+	k3.ifindex = 29;
+	k3.direction = obserwrt::INGRESS;
+	k3.family = 4;
+	k3.protocol = 1;
+	std::memcpy(k3.src, v4in6(192, 0, 2, 7).data(), 16);
+	std::memcpy(k3.dst, v4in6(198, 51, 100, 7).data(), 16);
+	k3.icmp_type = 8;
+	obserwrt::FlowValue v3{};
+	v3.packets = 3;
+	v3.bytes = 252;
+	v3.first_seen = now_ns - 3000000000ULL;
+	v3.last_seen = now_ns;
+	ex.emit(k3, v3, true, nullptr);
 
 	/* IPv6 UDP ingress, ifindex 30, 2001:db8::1 -> 2001:db8::2 */
 	obserwrt::FlowKey k2{};
@@ -112,7 +129,7 @@ int main(int argc, char **argv)
 	v2.bytes = 200;
 	v2.first_seen = now_ns - 2000000000ULL;
 	v2.last_seen = now_ns;
-	ex.emit(k2, v2, nullptr);
+	ex.emit(k2, v2, false, nullptr);
 
 	ex.flush(start_s);
 	std::printf("emit: sent to %s:%u\n", host.c_str(), port);

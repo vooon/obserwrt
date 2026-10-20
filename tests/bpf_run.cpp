@@ -25,6 +25,7 @@
 #include <cstring>
 #include <vector>
 
+#include "bpf.hpp"
 #include "flow.hpp"
 
 static int g_failures = 0;
@@ -139,9 +140,11 @@ void test_eth_tcp_gso(const Ctx &c)
 	CHECK_EQ(v.packets, 10);
 	CHECK_EQ(v.bytes, 3040 + 9 * 40);
 	CHECK_EQ(v.tcp_flags, 0x18);
+	CHECK_EQ(v.vlan_id, 0); /* untagged */
 }
 
-/* 802.1Q-tagged UDP: the parser walks the tag to L3. */
+/* 802.1Q-tagged UDP: the parser walks the tag to L3 and records the VID
+ * in the value (not the key). */
 void test_vlan_udp(const Ctx &c)
 {
 	const uint8_t dmac[6] = {0x02, 0xaa, 0, 0, 0, 0x02};
@@ -161,6 +164,7 @@ void test_vlan_udp(const Ctx &c)
 	}
 	CHECK_EQ(v.packets, 1);
 	CHECK_EQ(v.bytes, 20 + 8 + 100);
+	CHECK_EQ(v.vlan_id, 100);
 }
 
 /* IPv6 Hop-by-Hop (Hdr Ext Len 0 = 8 bytes) in front of an ICMPv6 MLDv2
@@ -230,6 +234,30 @@ void test_stats(const Ctx &c)
 	CHECK_EQ(sum[STAT_FLOWS_CREATED], 3);
 }
 
+/* The agent's batched map walk returns every flow with its value. */
+void test_read_flows(const Ctx &c)
+{
+	std::vector<flow_key> keys;
+	std::vector<flow_val> values;
+	if (!obserwrt::read_flows(c.flows, keys, values)) {
+		std::fprintf(stderr, "FAIL %s: read_flows: %s\n", __func__, std::strerror(errno));
+		g_failures++;
+		return;
+	}
+	CHECK_EQ(keys.size(), 3);
+	CHECK_EQ(values.size(), keys.size());
+	for (size_t i = 0; i < keys.size() && i < values.size(); i++) {
+		flow_val v;
+		if (!lookup(c, keys[i], v)) {
+			std::fprintf(stderr, "FAIL %s: key %zu not in map\n", __func__, i);
+			g_failures++;
+			continue;
+		}
+		CHECK_EQ(values[i].packets, v.packets);
+		CHECK_EQ(values[i].bytes, v.bytes);
+	}
+}
+
 } /* namespace */
 
 int main(int argc, char **argv)
@@ -274,6 +302,7 @@ int main(int argc, char **argv)
 	test_ipv6_hbh(c);
 	test_arp(c);
 	test_stats(c);
+	test_read_flows(c);
 	bpf_object__close(obj);
 
 	if (g_failures != 0) {

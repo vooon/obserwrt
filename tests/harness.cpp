@@ -181,6 +181,7 @@ static void test_ipfix_wire()
 	v1.first_seen = 1700000000000000000ULL;
 	v1.last_seen = 1700006000000000000ULL;
 	v1.tcp_flags = 0x18;
+	v1.vlan_id = 100;
 
 	/* IPv6 UDP ingress, ifindex 30, 2001:db8::1 -> 2001:db8::2 */
 	uint8_t s1[16] = {0};
@@ -213,51 +214,72 @@ static void test_ipfix_wire()
 	v2.tcp_flags = 0;
 
 	e.send_templates(1615382640ULL);
-	e.emit(k1, v1, nullptr);
-	e.emit(k2, v2, nullptr);
+	e.emit(k1, v1, false, nullptr);
+	e.emit(k2, v2, true, nullptr);
+
+	/* ICMPv6 echo request (128/0) on the v6 template: icmpTypeCodeIPv6. */
+	FK k3 = k2;
+	k3.protocol = 58;
+	k3.sport = 0;
+	k3.dport = 0;
+	k3.icmp_type = 128;
+	k3.icmp_code = 0;
+	e.emit(k3, v2, false, nullptr);
 	e.flush(1615382640ULL);
 
 	const auto &d = e.captured();
 	CHECK_EQ(d.size(), (size_t)3);
 
-	/* [0] templates: len 128, version 10, exportTime, seq 0, domain 1. */
+	/* [0] templates: len 168, version 10, exportTime, seq 0, domain 1. */
 	const auto &t = d[0];
-	CHECK_EQ(t.size(), (size_t)128);
+	CHECK_EQ(t.size(), (size_t)168);
 	CHECK_EQ(r16(t, 0), (uint16_t)10);
-	CHECK_EQ(r16(t, 2), (uint16_t)128);
+	CHECK_EQ(r16(t, 2), (uint16_t)168);
 	CHECK_EQ(r32(t, 4), (uint32_t)1615382640);
 	CHECK_EQ(r32(t, 8), (uint32_t)0);
 	CHECK_EQ(r32(t, 12), (uint32_t)1);
 
-	/* set 1: TemplateSet(2) with v4 template tid 256, 12 fields, first (8,4). */
+	/* set 1: TemplateSet(2) with v4 template tid 256, 17 fields, first (8,4). */
 	CHECK_EQ(r16(t, 16), (uint16_t)2);
-	CHECK_EQ(r16(t, 18), (uint16_t)56);
+	CHECK_EQ(r16(t, 18), (uint16_t)76);
 	CHECK_EQ(r16(t, 20), (uint16_t)256);
-	CHECK_EQ(r16(t, 22), (uint16_t)12);
+	CHECK_EQ(r16(t, 22), (uint16_t)17);
 	CHECK_EQ(r16(t, 24), (uint16_t)8);
 	CHECK_EQ(r16(t, 26), (uint16_t)4);
 	/* IE 7/8 are flowStart/EndMilliseconds (152/153), not Seconds (150/151). */
 	CHECK_EQ(r16(t, 52), (uint16_t)152);
 	CHECK_EQ(r16(t, 56), (uint16_t)153);
-	CHECK_EQ(r16(t, 68), (uint16_t)14); /* last field: egressInterface */
+	CHECK_EQ(r16(t, 68), (uint16_t)14); /* egressInterface */
 	CHECK_EQ(r16(t, 70), (uint16_t)4);
+	CHECK_EQ(r16(t, 72), (uint16_t)32); /* icmpTypeCodeIPv4 */
+	CHECK_EQ(r16(t, 74), (uint16_t)2);
+	CHECK_EQ(r16(t, 76), (uint16_t)61); /* flowDirection */
+	CHECK_EQ(r16(t, 78), (uint16_t)1);
+	CHECK_EQ(r16(t, 80), (uint16_t)136); /* flowEndReason */
+	CHECK_EQ(r16(t, 82), (uint16_t)1);
+	CHECK_EQ(r16(t, 84), (uint16_t)34); /* samplingInterval */
+	CHECK_EQ(r16(t, 86), (uint16_t)4);
+	CHECK_EQ(r16(t, 88), (uint16_t)58); /* last field: vlanId */
+	CHECK_EQ(r16(t, 90), (uint16_t)2);
 
-	/* set 2: v6 template tid 257: set hdr @72, template hdr @76, fields @80. */
-	CHECK_EQ(r16(t, 72), (uint16_t)2);
-	CHECK_EQ(r16(t, 74), (uint16_t)56);
-	CHECK_EQ(r16(t, 76), (uint16_t)257);
-	CHECK_EQ(r16(t, 78), (uint16_t)12);
-	CHECK_EQ(r16(t, 80), (uint16_t)27); /* sourceIPv6Address */
-	CHECK_EQ(r16(t, 82), (uint16_t)16);
-	CHECK_EQ(r16(t, 108), (uint16_t)152); /* flowStartMilliseconds */
-	CHECK_EQ(r16(t, 112), (uint16_t)153); /* flowEndMilliseconds */
+	/* set 2: v6 template tid 257: set hdr @92, template hdr @96, fields @100. */
+	CHECK_EQ(r16(t, 92), (uint16_t)2);
+	CHECK_EQ(r16(t, 94), (uint16_t)76);
+	CHECK_EQ(r16(t, 96), (uint16_t)257);
+	CHECK_EQ(r16(t, 98), (uint16_t)17);
+	CHECK_EQ(r16(t, 100), (uint16_t)27); /* sourceIPv6Address */
+	CHECK_EQ(r16(t, 102), (uint16_t)16);
+	CHECK_EQ(r16(t, 128), (uint16_t)152); /* flowStartMilliseconds */
+	CHECK_EQ(r16(t, 132), (uint16_t)153); /* flowEndMilliseconds */
+	CHECK_EQ(r16(t, 148), (uint16_t)139); /* icmpTypeCodeIPv6 */
+	CHECK_EQ(r16(t, 164), (uint16_t)58);  /* vlanId */
 
-	/* [1] v4 data record: len 75, seq 0. */
+	/* [1] v4 data record: len 85, seq 0. */
 	const auto &v4 = d[1];
-	CHECK_EQ(v4.size(), (size_t)75);
+	CHECK_EQ(v4.size(), (size_t)85);
 	CHECK_EQ(r32(v4, 8), (uint32_t)0);	     /* seq */
 	CHECK_EQ(r16(v4, 16), (uint16_t)256);	     /* data set id */
-	CHECK_EQ(r16(v4, 18), (uint16_t)59);	     /* set length 4+55 */
+	CHECK_EQ(r16(v4, 18), (uint16_t)69);	     /* set length 4+65 */
 	CHECK_EQ(r32(v4, 20), (uint32_t)0xc0000201); /* 192.0.2.1 */
 	CHECK_EQ(r32(v4, 24), (uint32_t)0xc6336402); /* 198.51.100.2 */
 	CHECK_EQ(r16(v4, 28), (uint16_t)12345);
@@ -270,13 +292,18 @@ static void test_ipfix_wire()
 	CHECK_EQ(r16(v4, 65), (uint16_t)0x18); /* tcpControlBits */
 	CHECK_EQ(r32(v4, 67), (uint32_t)0);    /* ingressInterface */
 	CHECK_EQ(r32(v4, 71), (uint32_t)29);   /* egressInterface */
+	CHECK_EQ(r16(v4, 75), (uint16_t)0);    /* icmpTypeCodeIPv4: TCP */
+	CHECK_EQ(u8(v4, 77), (uint8_t)1);      /* flowDirection: egress */
+	CHECK_EQ(u8(v4, 78), (uint8_t)2);      /* flowEndReason: active */
+	CHECK_EQ(r32(v4, 79), (uint32_t)1);    /* samplingInterval */
+	CHECK_EQ(r16(v4, 83), (uint16_t)100);  /* vlanId */
 
-	/* [2] v6 data record: len 99, seq 1, ingress 30. */
+	/* [2] v6 data set: two records (UDP, ICMPv6), len 16+4+2*89, seq 1. */
 	const auto &v6 = d[2];
-	CHECK_EQ(v6.size(), (size_t)99);
+	CHECK_EQ(v6.size(), (size_t)198);
 	CHECK_EQ(r32(v6, 8), (uint32_t)1);
 	CHECK_EQ(r16(v6, 16), (uint16_t)257);
-	CHECK_EQ(r16(v6, 18), (uint16_t)83);		 /* 4 + 79 */
+	CHECK_EQ(r16(v6, 18), (uint16_t)182);		 /* 4 + 2*89 */
 	CHECK(std::memcmp(v6.data() + 20, s1, 16) == 0); /* 2001:db8::1 */
 	CHECK(std::memcmp(v6.data() + 36, s2, 16) == 0); /* 2001:db8::2 */
 	CHECK_EQ(r16(v6, 52), (uint16_t)53);
@@ -289,6 +316,15 @@ static void test_ipfix_wire()
 	CHECK_EQ(r16(v6, 89), (uint16_t)0);
 	CHECK_EQ(r32(v6, 91), (uint32_t)30); /* ingressInterface */
 	CHECK_EQ(r32(v6, 95), (uint32_t)0);  /* egressInterface */
+	CHECK_EQ(r16(v6, 99), (uint16_t)0);  /* icmpTypeCodeIPv6: UDP */
+	CHECK_EQ(u8(v6, 101), (uint8_t)0);   /* flowDirection: ingress */
+	CHECK_EQ(u8(v6, 102), (uint8_t)1);   /* flowEndReason: idle (expired) */
+	CHECK_EQ(r32(v6, 103), (uint32_t)1); /* samplingInterval */
+	CHECK_EQ(r16(v6, 107), (uint16_t)0); /* vlanId: untagged */
+
+	/* second v6 record (offset 109): ICMPv6 echo request, 128 << 8 | 0. */
+	CHECK_EQ(u8(v6, 109 + 36), (uint8_t)58);       /* protocolIdentifier */
+	CHECK_EQ(r16(v6, 109 + 79), (uint16_t)0x8000); /* icmpTypeCodeIPv6 */
 }
 
 /* ---------- §5 key/value layouts (pinned by bpf/obserwrt-flow.h) ---------- */
@@ -347,8 +383,16 @@ static void test_key_value_layouts()
 	CHECK_EQ(vp[9], (uint8_t)0x30);
 	CHECK_EQ(vp[32], (uint8_t)0x18); /* tcp_flags */
 	CHECK_EQ(vp[33], (uint8_t)0x00);
-	for (int i = 34; i < 40; i++)
+	CHECK_EQ(vp[34], (uint8_t)0x00); /* vlan_id 0 = untagged */
+	CHECK_EQ(vp[35], (uint8_t)0x00);
+	for (int i = 36; i < 40; i++)
 		CHECK_EQ(vp[i], (uint8_t)0x00); /* trailing pad */
+
+	FV vt{};
+	vt.vlan_id = 0x0123;
+	const auto *vtp = reinterpret_cast<const uint8_t *>(&vt);
+	CHECK_EQ(vtp[34], (uint8_t)0x23); /* vlan_id LE (host-endian) */
+	CHECK_EQ(vtp[35], (uint8_t)0x01);
 
 	CHECK_EQ(v.packets, (uint64_t)10);
 	CHECK_EQ(v.bytes, (uint64_t)12340);
@@ -468,8 +512,10 @@ static void test_syslog_export()
 	v.first_seen = 10;
 	v.last_seen = 20;
 	v.tcp_flags = 2;
+	v.vlan_id = 10;
 
 	const std::string js = obserwrt::SyslogExporter::encode_json(k, v, true, nullptr, "30");
+	CHECK(js.find("\"tcp_flags\":2,\"vlan_id\":10,\"expired\":true") != std::string::npos);
 	CHECK(js.find("\"ifname\":\"30\"") != std::string::npos);
 	CHECK(js.find("\"src\":\"192.0.2.10\"") != std::string::npos);
 	CHECK(js.find("\"dst\":\"198.51.100.20\"") != std::string::npos);
@@ -511,6 +557,7 @@ static void test_syslog_export()
 	CHECK(lf.find("src=\"2001:db8::1\"") != std::string::npos);
 	CHECK(lf.find("dst=\"2001:db8::2\"") != std::string::npos);
 	CHECK(lf.find("expired=0") != std::string::npos);
+	CHECK(lf.find(" vlan_id=0 expired=0") != std::string::npos);
 
 	/* RFC 5424 envelope. */
 	const std::string fr = obserwrt::SyslogExporter::frame(lf, "probe-awg0", 1700000000);

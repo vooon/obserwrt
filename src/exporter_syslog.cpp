@@ -49,6 +49,7 @@ struct SyslogRecord {
 	uint64_t first_seen_ns;
 	uint64_t last_seen_ns;
 	uint16_t tcp_flags;
+	uint16_t vlan_id;
 	bool expired;
 };
 
@@ -86,6 +87,7 @@ SyslogRecord make_record(const FlowKey &k, const FlowValue &v, bool expired, con
 	r.first_seen_ns = v.first_seen;
 	r.last_seen_ns = v.last_seen;
 	r.tcp_flags = v.tcp_flags;
+	r.vlan_id = v.vlan_id;
 	r.expired = expired;
 	return r;
 }
@@ -183,6 +185,7 @@ std::string SyslogExporter::encode_json(const FlowKey &k, const FlowValue &v, bo
 	o["first_seen_ns"] = r.first_seen_ns;
 	o["last_seen_ns"] = r.last_seen_ns;
 	o["tcp_flags"] = r.tcp_flags;
+	o["vlan_id"] = r.vlan_id;
 	o["expired"] = r.expired;
 	/* dump() without arguments: compact, no spaces, proper escaping. */
 	return o.dump();
@@ -226,6 +229,8 @@ std::string SyslogExporter::encode_logfmt(const FlowKey &k, const FlowValue &v, 
 	out += fmt_u64(r.last_seen_ns);
 	out += " tcp_flags=";
 	out += fmt_u64(r.tcp_flags);
+	out += " vlan_id=";
+	out += fmt_u64(r.vlan_id);
 	out += " expired=";
 	out += r.expired ? "1" : "0";
 	return out;

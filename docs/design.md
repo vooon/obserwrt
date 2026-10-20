@@ -119,9 +119,10 @@ separate flows across VLANs. **Caveat:** if two VLANs reuse overlapping L3
 addresses (e.g. RFC 1918 reuse behind different VLANs on the same bridge), their
 flows would collapse in the cache. In that situation the parser still reaches
 the IP header correctly across up to two 802.1Q/802.1ad tags (VLANs are walked
-to find L3, not dropped), but a future option could add `vlanId` to the key or
-value to disambiguate. L2 MACs / VLAN id are currently only enrichment
-candidates, not identity.
+to find L3, not dropped). The outer VLAN id is carried as **value enrichment**
+(`vlan_id`, §5.2, exported as IPFIX `vlanId`), not identity: it is taken from
+the flow's first packet, so in the overlapping case above the collapsed flow
+reports only one of the VLANs. L2 MACs remain enrichment candidates only.
 
 **Framing** is a property of the device, not of the packet. The object carries
 two program pairs, `obserwrt_{ingress,egress}_eth` and `_l3`, and the agent
@@ -182,18 +183,24 @@ are 0 for ICMP.
 
 The value keeps the `u64` counters **naturally aligned** (the 8-byte fields must
 be 8-byte aligned so atomic increments are valid in BPF), so the `struct`
-size is 40 bytes (8×4 counters + a 16-bit `tcp_flags` + 6 trailing pad).
+size is 40 bytes (8×4 counters + 16-bit `tcp_flags` and `vlan_id` + 4 trailing
+pad).
 
-| field      | struct | width |
-|------------|--------|-------|
-| packets    | `u64`  | 8     |
-| bytes      | `u64`  | 8     |
-| first_seen | `u64`  | 8     |
-| last_seen  | `u64`  | 8     |
-| tcp_flags  | `u16`  | 2     |
+| field      | offset | struct | width |
+|------------|--------|--------|-------|
+| packets    | 0      | `u64`  | 8     |
+| bytes      | 8      | `u64`  | 8     |
+| first_seen | 16     | `u64`  | 8     |
+| last_seen  | 24     | `u64`  | 8     |
+| tcp_flags  | 32     | `u16`  | 2     |
+| vlan_id    | 34     | `u16`  | 2     |
 
 `tcp_flags` is a 16-bit `tcpControlBits` (the standard low-8 TCP flags are
-accumulated with OR across the flow's packets, never summed).
+accumulated with OR across the flow's packets, never summed). `vlan_id` is the
+outer 802.1Q/802.1ad VID of the flow's first packet on an Ethernet observation
+point — the offloaded tag in skb metadata if present, else the first in-packet
+tag; 0 for untagged frames and L3 devices. It is set once at flow creation (it
+used the former padding, so the value size is unchanged).
 
 ### 5.3 Address normalization
 
@@ -253,7 +260,9 @@ was created (AWG/WireGuard, WAN, bridge, TUN, VXLAN, physical Ethernet).
 ## 7. Flow lifecycle
 
 Packet: `lookup(key)` → `create/update` → `packets += segs`, `bytes += l3len`,
-`last_seen = now`, accumulate `tcp_flags`. Userspace periodically reads the map.
+`last_seen = now`, accumulate `tcp_flags`. Userspace periodically reads the map
+in one `BPF_MAP_LOOKUP_BATCH` walk (keys and values together, bucket by bucket,
+so LRU eviction during the walk cannot restart or truncate it).
 
 Counting is GSO-aware: a GRO/TSO super-packet (routine on 10G NICs, virtio,
 veth) counts as `skb->gso_segs` packets. `bytes` are **L3 octets** (IP header +
@@ -337,7 +346,18 @@ flowEndMilliseconds
 tcpControlBits
 ingressInterface
 egressInterface
+icmpTypeCodeIPv4 / icmpTypeCodeIPv6   # type << 8 | code; 0 for non-ICMP
+flowDirection                         # 0 ingress, 1 egress
+flowEndReason                         # 1 idle timeout (expired), 2 active re-export
+samplingInterval                      # always 1: every packet is accounted
+vlanId                                # §5.2 vlan_id
 ```
+
+`samplingInterval` is sent in every data record rather than in an options
+template, so a collector never falls back to its own default sampling rate
+(which would multiply all bytes/packets), not even in the first template
+interval after it restarts. Akvorado reads it from data records; goflow2 v2
+reads sampling only from options records and shows 0.
 
 ### 8.2 Syslog exporter
 
@@ -375,6 +395,8 @@ Example JSON payload:
   "bytes": 31981,
   "first_seen_ns": 123456789,
   "last_seen_ns": 123456999,
+  "tcp_flags": 24,
+  "vlan_id": 0,
   "expired": false
 }
 ```
@@ -618,6 +640,14 @@ original↔translated tuple correlation; proxy/socket correlation (e.g.
 hev-socks5-tunnel SOCKS associations); a native exporter able to carry richer
 observations than standard IPFIX.
 
+Conntrack translation (NAT) is reachable from TC via the `bpf_skb_ct_lookup`
+kfunc (kernel ≥ 6.0 with nf_conntrack BTF); if pursued, it would be a
+per-interface option (e.g. the WAN only) filling the IPFIX `postNAT*`/`postNAPT*`
+IEs from a separate map, looked up once per flow rather than per packet.
+
+IPFIX over DTLS (RFC 7011 §10.4.1): deferred until a collector in use (Akvorado)
+can receive it; today the transport is plain UDP on a trusted path.
+
 ## 16. Release criteria
 
 ### v0.1 — met (initial end-to-end)
@@ -667,3 +697,14 @@ nodes: bonds, bridges, VXLAN, 10G fabric ports):
 | Counters | GSO-aware packets, L3-octet bytes (§7); `obserwrt_stats` per-CPU, no shared atomics (§9) |
 | Packaging | `.deb` marks `/etc/obserwrt.conf` as a conffile; systemd unit under `/usr/lib` |
 | Verification | `BPF_PROG_TEST_RUN` test (`tests/bpf_run.cpp`) in CI: 4x: dst MAC, GSO, 802.1Q, IPv6 HBH, ARP, per-CPU sums |
+
+### v0.5 — in progress (record completeness)
+
+Fixes found by checking the live data in Akvorado:
+
+| area | delivered |
+|------|-----------|
+| IPFIX | ICMP type/code (IE 32/139), `flowDirection` (61), `flowEndReason` (136), `vlanId` (58) in both templates (17 fields) |
+| Sampling | explicit `samplingInterval = 1` per record: the collector's default rate no longer scales unsampled counters |
+| VLAN | outer VID as flow-value enrichment (§4, §5.2), also in the syslog record |
+| Map walk | batched `BPF_MAP_LOOKUP_BATCH` read of keys + values; no restart under LRU churn, one syscall per batch instead of two per flow |

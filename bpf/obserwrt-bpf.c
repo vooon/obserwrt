@@ -146,6 +146,7 @@ observe(struct __sk_buff *skb, __u8 direction, const int eth)
 	__u32 frag_off = 0;   /* !=0 means a non-first fragment: no L4 */
 	__u32 l4hdr = 0;      /* L4 header bytes repeated in every GSO segment */
 	__u32 segs, l3len;
+	__u16 vlan = 0;       /* outer VLAN id (Ethernet only), value enrichment */
 	int have_l4 = 0;
 
 	/* A GRO/TSO super-packet stands for gso_segs wire packets. */
@@ -170,11 +171,18 @@ observe(struct __sk_buff *skb, __u8 direction, const int eth)
 		if (p + 14 > data_end)
 			return TC_ACT_OK;
 
+		/* An offloaded (stripped) tag lives in skb metadata and is the
+		 * outer one; otherwise take the first in-packet tag below. */
+		if (skb->vlan_present)
+			vlan = skb->vlan_tci & 0x0fff;
+
 		et = bpf_ntohs(*(__u16 *)(p + 12));
 		l3off = ETH_HLEN;
 		if (et == ETH_P_8021Q || et == ETH_P_8021AD || et == 0x9100) {
 			if (p + 18 > data_end)
 				return TC_ACT_OK;
+			if (!vlan)
+				vlan = bpf_ntohs(*(__u16 *)(p + 14)) & 0x0fff;
 			et = bpf_ntohs(*(__u16 *)(p + 16));
 			l3off = ETH_HLEN + 4;
 			if (et == ETH_P_8021Q || et == ETH_P_8021AD) {
@@ -325,6 +333,7 @@ observe(struct __sk_buff *skb, __u8 direction, const int eth)
 		nv.first_seen = now;
 		nv.last_seen = now;
 		nv.tcp_flags = tcpf;
+		nv.vlan_id = vlan;    /* VLAN is not identity (§4): first packet's */
 		if (bpf_map_update_elem(&obserwrt_flows, &key, &nv, BPF_ANY) == 0)
 			stat_add(STAT_FLOWS_CREATED, 1);
 	}

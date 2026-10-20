@@ -55,9 +55,9 @@ class IpfixExporter
 	/* Send the two template sets as one datagram (also at init). */
 	void send_templates(uint32_t export_time_s);
 
-	/* Buffer one observation; `delta` null means cumulative counters
-	 * (identical fallback to exporter_ipfix.uc). */
-	void emit(const FlowKey &k, const FlowValue &v, const Delta *delta);
+	/* Buffer one observation; `expired` selects flowEndReason (idle vs
+	 * active timeout); `delta` null means cumulative counters. */
+	void emit(const FlowKey &k, const FlowValue &v, bool expired, const Delta *delta);
 
 	/* Flush buffered records (retransmitting templates when their interval is
 	 * due, matching exporter_ipfix.uc flush()). */
