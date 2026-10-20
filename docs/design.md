@@ -783,7 +783,7 @@ nodes: bonds, bridges, VXLAN, 10G fabric ports):
 | Packaging | `.deb` marks `/etc/obserwrt.conf` as a conffile; systemd unit under `/usr/lib` |
 | Verification | `BPF_PROG_TEST_RUN` test (`tests/bpf_run.cpp`) in CI: 4x: dst MAC, GSO, 802.1Q, IPv6 HBH, ARP, per-CPU sums |
 
-### v0.5 — in progress (record completeness)
+### v0.5 — met (record completeness; released as `0.5`)
 
 Fixes found by checking the live data in Akvorado:
 

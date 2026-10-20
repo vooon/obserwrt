@@ -36,6 +36,12 @@ obserwrt is built for how OpenWrt actually works:
 
 ## Status
 
+- **v0.5.0** — complete IPFIX records: explicit sampling interval 1 (no
+  collector default rate scaling the counters), ICMP type/code, flow direction
+  and end reason, VLAN id and DSCP; per-device packet-class counters
+  (IPv4/IPv6/ARP/other) for alerting; optional kernel drop tracing
+  (`track_drops`) exported as `forwardingStatus` with the drop reason. The
+  eBPF program is now GPL-2.0-only.
 - **v0.4.0** — Ethernet observation points (bridges, bonds, VLANs, VXLAN,
   physical NICs) are framed per device, so plain-Linux/Proxmox hosts are
   supported alongside the routers; packet/byte counts are GSO-aware L3 octets,
