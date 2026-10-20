@@ -45,7 +45,7 @@ struct flow_key {
 } __attribute__((packed));
 
 /* Flow value (40 bytes, native endian) - §5.2. NOT packed: the 8-byte
- * counters need natural alignment for in-kernel atomic increments; the 4
+ * counters need natural alignment for in-kernel atomic increments; the 3
  * trailing bytes of padding complete sizeof() == 40. */
 struct flow_val {
 	__u64 packets;    /*  0 */
@@ -54,6 +54,8 @@ struct flow_val {
 	__u64 last_seen;  /* 24 */
 	__u16 tcp_flags;  /* 32 */
 	__u16 vlan_id;    /* 34: outer 802.1Q/ad VID of the first packet, 0 = untagged */
+	__u8  tos;        /* 36: IPv4 TOS / IPv6 Traffic Class of the first packet
+	                   *     (DSCP << 2 | ECN) */
 };
 
 /* Per-device packet classes (obserwrt_devstats, §9). Classes are disjoint by

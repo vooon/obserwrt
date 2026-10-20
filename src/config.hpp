@@ -51,7 +51,7 @@ struct Config {
 	/* Record kernel drops on attached devices (tp_btf/kfree_skb) and export
 	 * them with forwardingStatus 128+ (design §7.1). Off by default: a WAN
 	 * under a port scan can produce many drop records. */
-	bool track_drops = false;
+	bool enable_drops = false;
 
 	/* Self-observability (Prometheus textfile collector). Empty disables. */
 	std::string prometheus_textfile;

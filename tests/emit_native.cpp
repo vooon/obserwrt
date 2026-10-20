@@ -88,6 +88,7 @@ int main(int argc, char **argv)
 	v1.last_seen = now_ns;
 	v1.tcp_flags = 0x18;
 	v1.vlan_id = 100;
+	v1.tos = 0xb8; /* DSCP 46 */
 	ex.emit(k1, v1, false, nullptr);
 
 	/* IPv4 ICMP echo request (8/0) ingress, ifindex 29: icmpTypeCodeIPv4. */

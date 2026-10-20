@@ -183,8 +183,8 @@ are 0 for ICMP.
 
 The value keeps the `u64` counters **naturally aligned** (the 8-byte fields must
 be 8-byte aligned so atomic increments are valid in BPF), so the `struct`
-size is 40 bytes (8×4 counters + 16-bit `tcp_flags` and `vlan_id` + 4 trailing
-pad).
+size is 40 bytes (8×4 counters + 16-bit `tcp_flags` and `vlan_id` + 8-bit `tos`
++ 3 trailing pad).
 
 | field      | offset | struct | width |
 |------------|--------|--------|-------|
@@ -194,13 +194,18 @@ pad).
 | last_seen  | 24     | `u64`  | 8     |
 | tcp_flags  | 32     | `u16`  | 2     |
 | vlan_id    | 34     | `u16`  | 2     |
+| tos        | 36     | `u8`   | 1     |
 
 `tcp_flags` is a 16-bit `tcpControlBits` (the standard low-8 TCP flags are
 accumulated with OR across the flow's packets, never summed). `vlan_id` is the
 outer 802.1Q/802.1ad VID of the flow's first packet on an Ethernet observation
 point — the offloaded tag in skb metadata if present, else the first in-packet
 tag; 0 for untagged frames and L3 devices. It is set once at flow creation (it
-used the former padding, so the value size is unchanged).
+used the former padding, so the value size is unchanged). `tos` is the IPv4 TOS
+byte / IPv6 Traffic Class of the flow's first packet (DSCP in the upper 6 bits,
+ECN in the lower 2), also set once at creation; DSCP can differ per packet, and
+like `vlan_id` it is enrichment, not identity. It is always collected (one byte,
+no option).
 
 ### 5.3 Address normalization
 
@@ -292,9 +297,9 @@ and deleted from the map (timeouts configurable, see §10):
 
 Correctness and bounded memory outrank sophisticated expiry.
 
-### 7.1 Drops (`track_drops`)
+### 7.1 Drops (`enable_drops`)
 
-With `main.track_drops` on, a `tp_btf/kfree_skb` program records packets the
+With `main.enable_drops` on, a `tp_btf/kfree_skb` program records packets the
 kernel **drops** (normal frees go through `consume_skb` and are not seen) whose
 skb device is an attached observation point (the agent mirrors attached
 ifindexes into `obserwrt_attached`). Off by default: a WAN under a port scan
@@ -405,7 +410,13 @@ flowEndReason                         # 1 idle timeout (expired), 2 active re-ex
 samplingInterval                      # always 1: every packet is accounted
 vlanId                                # §5.2 vlan_id
 forwardingStatus                      # 0 unknown (flows), 128+ drop records (§7.1)
+ipClassOfService                      # §5.2 tos (DSCP << 2 | ECN), first packet
 ```
+
+The templates are fixed (19 fields, native-size encoding): no optional fields
+and no reduced-size encoding, so a template's layout never depends on config.
+Akvorado stores `ipClassOfService` in its `IPTos` column (disabled by default
+in its schema, like `TCPFlags`); DSCP there is `IPTos >> 2`.
 
 `samplingInterval` is sent in every data record rather than in an options
 template, so a collector never falls back to its own default sampling rate
@@ -451,6 +462,7 @@ Example JSON payload:
   "last_seen_ns": 123456999,
   "tcp_flags": 24,
   "vlan_id": 0,
+  "dscp": 0,
   "expired": false
 }
 ```
@@ -520,7 +532,7 @@ need for differing per-device behavior exists.
 
 The per-protocol idle timeouts (`tcp_timeout`/`udp_timeout`/`icmp_timeout`/
 `general_timeout`), the flow-map capacity (`max_flows`, 0 = the baked
-4096-entry default) and drop tracking (`track_drops`, §7.1, default off) live in
+4096-entry default) and drop tracking (`enable_drops`, §7.1, default off) live in
 the `main` section; the per-router IPFIX
 `observation_domain` lives in the exporter section, so each router can carve
 out its own domain for multi-collector deployments.
@@ -538,7 +550,7 @@ config obserwrt 'main'
     option icmp_timeout '30'
     option general_timeout '10'
     # option max_flows '4096'      # LRU flow-map capacity; 0 = baked-in default
-    # option track_drops '1'       # record kernel drops (§7.1); default off
+    # option enable_drops '1'      # record kernel drops (§7.1); default off
     # option log_level 'debug'     # error|warning|notice|info|debug
     # option prometheus_textfile '/run/prometheus/textfile/obserwrt.prom'  # unset = disabled
     option prometheus_interval '20'
@@ -570,7 +582,7 @@ udp_timeout = 60
 icmp_timeout = 30
 general_timeout = 10
 # max_flows = 4096        # LRU flow-map capacity; 0 = baked-in default
-# track_drops = false     # record kernel drops (§7.1)
+# enable_drops = false    # record kernel drops (§7.1)
 # log_level = notice      # error, warning, notice, info, debug
 # prometheus_textfile = /run/prometheus/textfile/obserwrt.prom
 prometheus_interval = 20
@@ -776,9 +788,9 @@ Fixes found by checking the live data in Akvorado:
 
 | area | delivered |
 |------|-----------|
-| IPFIX | ICMP type/code (IE 32/139), `flowDirection` (61), `flowEndReason` (136), `vlanId` (58) in both templates (17 fields) |
+| IPFIX | ICMP type/code (IE 32/139), `flowDirection` (61), `flowEndReason` (136), `vlanId` (58), `forwardingStatus` (89), `ipClassOfService` (5) in both templates (19 fields) |
 | Sampling | explicit `samplingInterval = 1` per record: the collector's default rate no longer scales unsampled counters |
-| VLAN | outer VID as flow-value enrichment (§4, §5.2), also in the syslog record |
+| VLAN, DSCP | outer VID and first-packet TOS as flow-value enrichment (§4, §5.2), also in the syslog record (`vlan_id`, `dscp`) |
 | Map walk | batched `BPF_MAP_LOOKUP_BATCH` read of keys + values; no restart under LRU churn, one syscall per batch instead of two per flow |
 | Device counters | `obserwrt_device_{packets,bytes}_total{ifname,direction,class}` (ipv4/ipv6/arp/other), §9 |
-| Drops | optional `tp_btf/kfree_skb` tracer (`track_drops`), drop records with `forwardingStatus` 128+ (IE 89, 18 fields), reason names from kernel BTF; eBPF program relicensed GPL-2.0-only (§7.1) |
+| Drops | optional `tp_btf/kfree_skb` tracer (`enable_drops`), drop records with `forwardingStatus` 128+ (IE 89), reason names from kernel BTF; eBPF program relicensed GPL-2.0-only (§7.1) |

@@ -147,7 +147,7 @@ int main(int argc, char **argv)
 
 	obserwrt::Bpf bpf;
 	std::string warn;
-	if (!bpf.load(bpf_object, cfg.max_flows, cfg.track_drops, &err, &warn)) {
+	if (!bpf.load(bpf_object, cfg.max_flows, cfg.enable_drops, &err, &warn)) {
 		SLOG(LOG_ERR, "bpf load failed")("error", err);
 		return 1;
 	}
