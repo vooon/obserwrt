@@ -184,7 +184,7 @@ are 0 for ICMP.
 The value keeps the `u64` counters **naturally aligned** (the 8-byte fields must
 be 8-byte aligned so atomic increments are valid in BPF), so the `struct`
 size is 40 bytes (8×4 counters + 16-bit `tcp_flags` and `vlan_id` + 8-bit `tos`
-+ 3 trailing pad).
++ 3 explicit `reserved` bytes, zero).
 
 | field      | offset | struct | width |
 |------------|--------|--------|-------|
@@ -195,6 +195,7 @@ size is 40 bytes (8×4 counters + 16-bit `tcp_flags` and `vlan_id` + 8-bit `tos`
 | tcp_flags  | 32     | `u16`  | 2     |
 | vlan_id    | 34     | `u16`  | 2     |
 | tos        | 36     | `u8`   | 1     |
+| reserved   | 37     | `u8[3]`| 3     |
 
 `tcp_flags` is a 16-bit `tcpControlBits` (the standard low-8 TCP flags are
 accumulated with OR across the flow's packets, never summed). `vlan_id` is the
