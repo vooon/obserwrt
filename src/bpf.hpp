@@ -35,8 +35,20 @@ class Bpf
 	Bpf &operator=(const Bpf &) = delete;
 
 	/* Open the object, set the SCHED_CLS/TCX program types, size the flow map
-	 * (`max_flows` == 0 keeps the baked-in default) and load. */
-	bool load(const std::string &object_path, uint32_t max_flows, std::string *err);
+	 * (`max_flows` == 0 keeps the baked-in default) and load. With
+	 * `track_drops`, also load + attach the tp_btf/kfree_skb drop tracer; if
+	 * that fails, flow collection still loads and `*warn` says why. */
+	bool load(const std::string &object_path, uint32_t max_flows, bool track_drops,
+		  std::string *err, std::string *warn = nullptr);
+
+	/* True when the drop tracer is loaded and attached. */
+	bool drops_active() const
+	{
+		return drops_active_;
+	}
+
+	/* Drain the drop map (lookup-and-delete): the drops since the last call. */
+	bool take_drops(std::vector<DropKey> &keys, std::vector<FlowValue> &values) const;
 
 	bool loaded() const
 	{
@@ -59,8 +71,18 @@ class Bpf
 	void purge_ifindex(uint32_t ifindex);
 
 	/* Self-observability. */
-	uint32_t map_limit() const;	       /* bpf_map_info.max_entries */
-	void bpf_stats(uint64_t out[4]) const; /* packets, bytes, flows_created, parsed */
+	uint32_t map_limit() const; /* bpf_map_info.max_entries */
+	/* obserwrt_stats slots, summed over CPUs (order of the BPF enum). */
+	enum : uint8_t {
+		STAT_PACKETS,
+		STAT_BYTES,
+		STAT_FLOWS_CREATED,
+		STAT_PARSED,
+		STAT_DROPS,
+		STAT_DROPS_UNPARSED,
+		STAT_COUNT,
+	};
+	void bpf_stats(uint64_t out[STAT_COUNT]) const;
 	/* Per-device/direction packet-class counters (obserwrt_devstats). */
 	bool dev_counters(std::vector<DevCounters> &out) const;
 
@@ -79,11 +101,19 @@ class Bpf
 	bpf_map *flows_ = nullptr;
 	bpf_map *stats_ = nullptr;
 	bpf_map *devstats_ = nullptr;
+	bpf_map *attached_ = nullptr;
+	bpf_map *drops_ = nullptr;
+	bpf_program *prog_drop_ = nullptr;
+	bpf_link *drop_link_ = nullptr;
+	bool drops_active_ = false;
 	/* [0] = L3 framing, [1] = Ethernet framing */
 	bpf_program *prog_ingress_[2] = {};
 	bpf_program *prog_egress_[2] = {};
 	std::map<uint32_t, Links> atts_; /* ifindex -> live tcx links */
 	std::string last_error_;
+
+	bool open_load(const std::string &path, uint32_t max_flows, bool with_drops,
+		       std::string *err);
 
 	/* Delete a device's class counters (both directions). */
 	void drop_dev_counters(uint32_t ifindex) const;
@@ -97,6 +127,10 @@ bool read_dev_counters(int fd, std::vector<DevCounters> &out);
  * key/value vectors. False on a map error; an empty map is success. Exposed
  * for the eBPF test-run (tests/bpf_run.cpp). */
 bool read_flows(int fd, std::vector<FlowKey> &keys, std::vector<FlowValue> &values);
+
+/* Drain a drop map (fd) with BPF_MAP_LOOKUP_AND_DELETE_BATCH. Exposed for
+ * tests/bpf_run.cpp. */
+bool drain_drops(int fd, std::vector<DropKey> &keys, std::vector<FlowValue> &values);
 
 /* FlowMap adapter over a loaded Bpf: snapshots keys and values per pass in
  * one batched walk, then serves get() from that snapshot; delete per key so

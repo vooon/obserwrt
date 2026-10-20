@@ -27,7 +27,7 @@ constexpr uint16_t VERSION = 10;
 /* ---------------------------------------------------------------------------
  * Template fields - IANA IPFIX IEs (RFC 7011), enterprise 0.
  *
- * Both templates carry the same 17-element record; only the address IEs
+ * Both templates carry the same 18-element record; only the address IEs
  * (and the ICMP type/code IE) differ: the v4 template (below) keys on the
  * IPv4-mapped ::ffff: prefix and emits the last 4 bytes of src/dst; the v6
  * template uses the 16-byte sourceIPv6Address / destinationIPv6Address IEs
@@ -55,6 +55,7 @@ constexpr uint16_t VERSION = 10;
  * | 136 | flowEndReason            | 1   | 1 idle timeout, 2 active (re-export)   |
  * | 34  | samplingInterval         | 4   | always 1: every packet is accounted    |
  * | 58  | vlanId                   | 2   | outer VLAN of the first packet, else 0 |
+ * | 89  | forwardingStatus         | 1   | 0 unknown (flows), 128+ dropped (§7.1) |
  *
  * samplingInterval is per record (not an options template) so a collector
  * never applies its own default rate, even right after it restarts; it is
@@ -86,6 +87,7 @@ const std::vector<std::pair<uint16_t, uint16_t>> FIELDS_V4 = {
     {136, 1}, /* flowEndReason */
     {34, 4},  /* samplingInterval */
     {58, 2},  /* vlanId */
+    {89, 1},  /* forwardingStatus */
 };
 
 //! Template for IPv6
@@ -107,6 +109,7 @@ const std::vector<std::pair<uint16_t, uint16_t>> FIELDS_V6 = {
     {136, 1}, /* flowEndReason */
     {34, 4},  /* samplingInterval */
     {58, 2},  /* vlanId */
+    {89, 1},  /* forwardingStatus */
 };
 
 /* flowEndReason (RFC 7011 IE 136). */
@@ -250,7 +253,8 @@ void IpfixExporter::flush_set(uint32_t export_time_s, uint16_t set_id,
 		emit(start, records.size(), cnt, body);
 }
 
-void IpfixExporter::emit(const FlowKey &k, const FlowValue &v, bool expired, const Delta *delta)
+void IpfixExporter::emit(const FlowKey &k, const FlowValue &v, bool expired, const Delta *delta,
+			 uint8_t forwarding_status)
 {
 	const uint64_t dp = delta ? delta->packets : v.packets;
 	const uint64_t db = delta ? delta->bytes : v.bytes;
@@ -261,11 +265,11 @@ void IpfixExporter::emit(const FlowKey &k, const FlowValue &v, bool expired, con
 	const uint32_t ingress = (k.direction == INGRESS) ? k.ifindex : 0;
 	const uint32_t egress = (k.direction == EGRESS) ? k.ifindex : 0;
 
-	/* Fixed record size per family (65 B v4 / 89 B v6) - reserve exactly so
+	/* Fixed record size per family (66 B v4 / 90 B v6) - reserve exactly so
 	 * building appends never reallocate (the datagram itself is assembled in
 	 * one pre-sized buffer in flush_set()). */
 	std::vector<std::byte> rec;
-	rec.reserve(k.family == 4 ? 65 : 89);
+	rec.reserve(k.family == 4 ? 66 : 90);
 
 	if (k.family == 4) {
 		append_raw(rec, k.src + 12, 4);
@@ -290,6 +294,7 @@ void IpfixExporter::emit(const FlowKey &k, const FlowValue &v, bool expired, con
 	rec.push_back(static_cast<std::byte>(expired ? END_IDLE_TIMEOUT : END_ACTIVE_TIMEOUT));
 	append_be(rec, SAMPLING_INTERVAL);
 	append_be(rec, v.vlan_id);
+	rec.push_back(static_cast<std::byte>(forwarding_status));
 
 	if (k.family == 4)
 		pending4_.push_back(std::move(rec));

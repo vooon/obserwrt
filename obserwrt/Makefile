@@ -9,7 +9,7 @@ PKG_BUILD_DEPENDS:=bpf-headers
 CMAKE_INSTALL:=1
 CMAKE_BINARY_SUBDIR:=build-cmake
 
-PKG_LICENSE:=Apache-2.0
+PKG_LICENSE:=Apache-2.0 GPL-2.0-only
 PKG_MAINTAINER:=Vladimir Ermakov <vooon341@gmail.com>
 
 include $(INCLUDE_DIR)/package.mk

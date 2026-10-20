@@ -58,3 +58,10 @@ src-git obserwrt https://github.com/vooon/obserwrt.git
 ./scripts/feeds update obserwrt
 ./scripts/feeds install obserwrt
 ```
+
+## License
+
+The agent and the shared flow header (`bpf/obserwrt-flow.h`) are Apache-2.0
+([LICENSE](LICENSE)). The eBPF program (`bpf/obserwrt-bpf.c`) is
+GPL-2.0-only: its drop tracer uses kernel helpers that are available only to
+GPL-compatible eBPF programs.

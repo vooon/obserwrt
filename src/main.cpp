@@ -31,6 +31,7 @@
 #include "bpf.hpp"
 #include "cli.hpp"
 #include "config.hpp"
+#include "drop_reasons.hpp"
 #include "exporter_ipfix.hpp"
 #include "exporter_syslog.hpp"
 #include "lifecycle.hpp"
@@ -145,11 +146,25 @@ int main(int argc, char **argv)
 		ipfix.send_templates(start_s);
 
 	obserwrt::Bpf bpf;
-	if (!bpf.load(bpf_object, cfg.max_flows, &err)) {
+	std::string warn;
+	if (!bpf.load(bpf_object, cfg.max_flows, cfg.track_drops, &err, &warn)) {
 		SLOG(LOG_ERR, "bpf load failed")("error", err);
 		return 1;
 	}
+	if (!warn.empty())
+		SLOG(LOG_WARNING, "bpf drop tracer")("error", warn);
 	metrics.set_map_limit(bpf.map_limit());
+
+	/* Kernel drop-reason names -> RFC 7270 forwardingStatus (§7.1). Without
+	 * BTF names, drops still export with status 128 and "reason_<n>". */
+	obserwrt::DropReasons drop_reasons;
+	if (bpf.drops_active()) {
+		std::string derr;
+		if (!drop_reasons.load(&derr))
+			SLOG(LOG_WARNING, "drop reasons unresolved")("error", derr);
+	}
+	std::vector<obserwrt::DropKey> drop_keys;
+	std::vector<obserwrt::FlowValue> drop_vals;
 
 	obserwrt::BpfFlowMap flowmap(&bpf);
 	obserwrt::Lifecycle lifecycle(cfg.timeouts);
@@ -293,7 +308,7 @@ int main(int argc, char **argv)
 				 * the boot-time offset (design §8.1 timestamps). */
 				ipfix.set_offset_ms(static_cast<uint64_t>(now_s) * 1000ULL -
 						    mono_ms());
-				uint64_t stat[4];
+				uint64_t stat[obserwrt::Bpf::STAT_COUNT];
 				bpf.bpf_stats(stat);
 				const obserwrt::Lifecycle::Stats st = lifecycle.run(
 				    flowmap,
@@ -305,6 +320,24 @@ int main(int argc, char **argv)
 					    if (syslog_active)
 						    syslog.emit(k, v, expired, &delta);
 				    });
+				/* Drop records: drained per pass, so each covers the
+				 * drops since the previous one (no delta tracking). */
+				if (bpf.drops_active() && bpf.take_drops(drop_keys, drop_vals)) {
+					for (size_t i = 0; i < drop_keys.size(); i++) {
+						const auto r =
+						    drop_reasons.lookup(drop_keys[i].reason);
+						const obserwrt::DropInfo di{r.forwarding_status,
+									    r.name};
+						metrics.observe();
+						if (cfg.ipfix.enabled)
+							ipfix.emit(drop_keys[i].flow, drop_vals[i],
+								   false, nullptr,
+								   di.forwarding_status);
+						if (syslog_active)
+							syslog.emit(drop_keys[i].flow, drop_vals[i],
+								    false, nullptr, &di);
+					}
+				}
 				if (cfg.ipfix.enabled)
 					ipfix.flush(now_s);
 				/* Fold transport send failures (counted in the exporters'
@@ -314,7 +347,12 @@ int main(int argc, char **argv)
 				SLOG(LOG_DEBUG, "lifecycle pass")("active", st.active)(
 				    "expired", st.expired)("map", st.map);
 				metrics.set_state(st.active, st.map, attached_names);
-				metrics.set_bpf(stat[0], stat[1], stat[3], stat[2]);
+				metrics.set_bpf(stat[obserwrt::Bpf::STAT_PACKETS],
+						stat[obserwrt::Bpf::STAT_BYTES],
+						stat[obserwrt::Bpf::STAT_PARSED],
+						stat[obserwrt::Bpf::STAT_FLOWS_CREATED]);
+				metrics.set_drops(stat[obserwrt::Bpf::STAT_DROPS],
+						  stat[obserwrt::Bpf::STAT_DROPS_UNPARSED]);
 				if (metrics.active()) {
 					std::vector<obserwrt::DevCounters> raw;
 					std::vector<obserwrt::DeviceCounters> devs;

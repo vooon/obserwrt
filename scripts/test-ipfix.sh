@@ -87,6 +87,8 @@ check "src_vlan=100"
 check "src_addr=192.0.2.7 dst_addr=198.51.100.7"
 check "proto=ICMP"
 check "icmp_type=8 icmp_code=0"
+check "src_addr=192.0.2.99 dst_addr=198.51.100.99"
+check "forwarding_status=130"
 # samplingInterval (IE 34) is in every record, but goflow2 v2 takes the rate
 # only from options records, so it prints sampling_rate=0; Akvorado reads it.
 

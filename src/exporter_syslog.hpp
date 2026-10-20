@@ -54,18 +54,22 @@ class SyslogExporter
 	}
 
 	/* Emit one observation (delta supplied by the lifecycle; fallback to
-	 * cumulative counters when null - identical to exporter_ipfix). */
-	void emit(const FlowKey &k, const FlowValue &v, bool expired, const Delta *delta);
+	 * cumulative counters when null - identical to exporter_ipfix). `drop`
+	 * is set for drop records (forwarding status + kernel reason name). */
+	void emit(const FlowKey &k, const FlowValue &v, bool expired, const Delta *delta,
+		  const DropInfo *drop = nullptr);
 
 	/* ---- encoding primitives (harness-pinned) ---- */
 
 	static std::string encode_json(const FlowKey &k, const FlowValue &v, bool expired,
-				       const Delta *delta, const std::string &ifname);
+				       const Delta *delta, const std::string &ifname,
+				       const DropInfo *drop = nullptr);
 	static std::string encode_logfmt(const FlowKey &k, const FlowValue &v, bool expired,
-					 const Delta *delta, const std::string &ifname);
+					 const Delta *delta, const std::string &ifname,
+					 const DropInfo *drop = nullptr);
 	static std::string encode(const FlowKey &k, const FlowValue &v, bool expired,
 				  const Delta *delta, const std::string &ifname,
-				  const std::string &format);
+				  const std::string &format, const DropInfo *drop = nullptr);
 
 	/* RFC 5424 envelope: <134>1 TIMESTAMP HOSTNAME obserwrt - - - MSG. */
 	static std::string frame(const std::string &message, const std::string &hostname,

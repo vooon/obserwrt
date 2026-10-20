@@ -73,7 +73,8 @@ Source map (see design §11 for the full feed layout):
 | path | role |
 |------|------|
 | `src/main.cpp` | epoll loop, exporters, reconcile wiring |
-| `src/bpf.cpp` | libbpf: map, walk, tcx attach, stats |
+| `src/bpf.cpp` | libbpf: map, walk, tcx attach, stats, drop tracer |
+| `src/drop_reasons.cpp` | kernel drop-reason names (BTF) → RFC 7270 status |
 | `src/lifecycle.cpp` | delta accounting + per-proto expiry |
 | `src/reconcile.cpp` | rtnetlink dump + RTM_NEWLINK/RTM_DELLINK |
 | `src/exporter_ipfix.cpp` | IPFIX (templates 256/257, chunking) |
@@ -82,7 +83,7 @@ Source map (see design §11 for the full feed layout):
 | `src/config_uci.cpp` / `src/config_mini.cpp` | UCI / INI config backends |
 | `src/udp_client.cpp` | dual-stack (v4/v6) remote UDP endpoint |
 | `src/log.hpp` / `src/version.hpp` | DAEMON_LOG, build_info |
-| `bpf/obserwrt-bpf.c` / `bpf/obserwrt-flow.h` | eBPF program + shared §5 header |
+| `bpf/obserwrt-bpf.c` / `bpf/obserwrt-flow.h` | eBPF program (GPL-2.0-only) + shared §5 header (Apache-2.0) |
 | `vendor/`, `linux/`, `obserwrt/files/` | headers, systemd unit/.conf, procd scripts |
 | `tests/`, `scripts/` | golden harness, eBPF test-run, goflow2 e2e emitter |
 
@@ -137,7 +138,7 @@ build/obserwrt -c linux/obserwrt.conf
 - **eBPF test-run** (`tests/bpf_run.cpp`, `ctest`, needs root; skipped
   unprivileged): loads the real object and runs crafted frames through it via
   `BPF_PROG_TEST_RUN` — framing, GSO/L3-octet counts, VLAN, IPv6 HBH, per-device
-  classes, per-CPU stats. Run: `sudo build/obserwrt-bpf-run build/obserwrt-bpf.o`
+  classes, per-CPU stats, a real kernel drop (UDP to a closed port on lo). Run: `sudo build/obserwrt-bpf-run build/obserwrt-bpf.o`
 
 ## Conventions
 

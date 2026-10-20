@@ -48,6 +48,11 @@ struct Config {
 	/* Flow-map LRU capacity; 0 = baked-in default of the loaded BPF object. */
 	uint32_t max_flows = 0;
 
+	/* Record kernel drops on attached devices (tp_btf/kfree_skb) and export
+	 * them with forwardingStatus 128+ (design §7.1). Off by default: a WAN
+	 * under a port scan can produce many drop records. */
+	bool track_drops = false;
+
 	/* Self-observability (Prometheus textfile collector). Empty disables. */
 	std::string prometheus_textfile;
 	uint32_t prometheus_interval = 20;

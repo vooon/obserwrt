@@ -56,8 +56,10 @@ class IpfixExporter
 	void send_templates(uint32_t export_time_s);
 
 	/* Buffer one observation; `expired` selects flowEndReason (idle vs
-	 * active timeout); `delta` null means cumulative counters. */
-	void emit(const FlowKey &k, const FlowValue &v, bool expired, const Delta *delta);
+	 * active timeout); `delta` null means cumulative counters;
+	 * `forwarding_status` is 0 (unknown) for flows, 128+ for drop records. */
+	void emit(const FlowKey &k, const FlowValue &v, bool expired, const Delta *delta,
+		  uint8_t forwarding_status = 0);
 
 	/* Flush buffered records (retransmitting templates when their interval is
 	 * due, matching exporter_ipfix.uc flush()). */

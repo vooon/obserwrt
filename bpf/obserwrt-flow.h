@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Apache-2.0 */
 /*
  * obserwrt - BPF flow-map key/value layouts (obserwrt-flow.h)
  *
@@ -78,8 +79,18 @@ struct dev_val {
 	__u64 bytes[OBSERWRT_CLASS_MAX];   /* 32 */
 };
 
+/* Drop-map key (52 bytes, packed) - §7.1: the flow tuple of a dropped
+ * packet plus the RAW kernel drop reason (enum skb_drop_reason, whose values
+ * differ between kernel versions; the agent resolves names from kernel BTF). */
+struct drop_key {
+	struct flow_key flow; /*  0 */
+	__u16 reserved;       /* 46: zero */
+	__u32 reason;         /* 48 */
+} __attribute__((packed));
+
 OBSERWRT_FLOW_ASSERT(sizeof(struct flow_key) == 46);
 OBSERWRT_FLOW_ASSERT(sizeof(struct flow_val) == 40);
+OBSERWRT_FLOW_ASSERT(sizeof(struct drop_key) == 52);
 OBSERWRT_FLOW_ASSERT(sizeof(struct dev_key) == 8);
 OBSERWRT_FLOW_ASSERT(sizeof(struct dev_val) == 64);
 

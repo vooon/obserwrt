@@ -54,6 +54,9 @@ class Metrics
 	void set_bpf(unsigned long long packets, unsigned long long bytes,
 		     unsigned long long accounted, unsigned long long flows_created);
 
+	/* Kernel drops on attached devices (drop tracer; 0 when off). */
+	void set_drops(unsigned long long drops, unsigned long long unparsed);
+
 	/* Per-device packet-class counters (obserwrt_device_{packets,bytes}_total). */
 	void set_devices(std::vector<DeviceCounters> devices);
 
@@ -76,6 +79,8 @@ class Metrics
 	unsigned long long bpf_bytes_ = 0;
 	unsigned long long bpf_accounted_ = 0;
 	unsigned long long bpf_flows_created_ = 0;
+	unsigned long long bpf_drops_ = 0;
+	unsigned long long bpf_drops_unparsed_ = 0;
 	uint32_t map_limit_ = 0;
 	std::vector<std::string> devices_;
 	std::vector<DeviceCounters> dev_counters_;

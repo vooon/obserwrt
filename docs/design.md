@@ -213,7 +213,8 @@ as a first-class field for struct alignment and debug parity.
 
 Parse IPv4/IPv6 and TCP/UDP/ICMP, extract ports, read `skb->ifindex`, determine
 ingress/egress from the attach point, and update counters/`tcp_flags`/
-first-last seen timestamps.
+first-last seen timestamps. Optionally (§7.1) record kernel drops on attached
+devices with the raw drop reason.
 
 **Not** in eBPF: IPFIX encoding, routing interpretation, service/DNS
 classification, topology knowledge, BIRD integration.
@@ -291,6 +292,58 @@ and deleted from the map (timeouts configurable, see §10):
 
 Correctness and bounded memory outrank sophisticated expiry.
 
+### 7.1 Drops (`track_drops`)
+
+With `main.track_drops` on, a `tp_btf/kfree_skb` program records packets the
+kernel **drops** (normal frees go through `consume_skb` and are not seen) whose
+skb device is an attached observation point (the agent mirrors attached
+ifindexes into `obserwrt_attached`). Off by default: a WAN under a port scan
+produces one drop record per scanned tuple.
+
+- **Key:** the §5.1 flow tuple plus the **raw** `enum skb_drop_reason` value
+  (`struct drop_key`, 52 bytes); value: the §5.2 flow value. Map
+  `obserwrt_drops`, LRU, 2048 entries.
+- **Direction:** `skb_iif == dev->ifindex` (received on this device) →
+  ingress, otherwise (forwarded out of, or originated on it) → egress. A drop
+  before the receive path set `skb_iif` reads as egress.
+- **Parsing:** the IP header and ports are read from kernel memory at
+  `skb->head + network_header` (CO-RE offsets). Simpler than the TC parser:
+  IPv6 extension headers are not walked (the next-header value is recorded as
+  the protocol, ports 0), and each drop counts as 1 packet of IP total length
+  (no GSO split). Non-IP drops, or drops before the network header is set,
+  count only in `obserwrt_drops_unparsed_total`.
+- **Export:** the agent drains the map (lookup-and-delete batch) every
+  lifecycle pass, so each drop record covers the drops since the previous
+  pass; no delta tracking. Records carry IPFIX `forwardingStatus` 128 + reason
+  (normal flow records carry 0 = unknown: TC does not know whether a packet is
+  later forwarded, delivered or dropped). Collectors separate traffic from
+  drops with `ForwardingStatus < 128`. Syslog adds `forwarding_status` and the
+  kernel `drop_reason` name.
+- **Reason mapping** (agent, `drop_reasons.cpp`): kernel reason values differ
+  between versions, so names are read from the running kernel's BTF and mapped
+  to RFC 7270 codes. Best fit, first match wins:
+
+  | kernel reason name (without `SKB_DROP_REASON_`) | forwardingStatus |
+  |------------------------------------------------|------------------|
+  | `*NETFILTER*`, `TC_*`, `XDP*` | 130 ACL drop |
+  | `*RPFILTER*` | 140 RPF |
+  | `*NOROUTE*` | 131 unroutable |
+  | `*CSUM*` | 134 bad checksum |
+  | `PKT_TOO_BIG` | 133 fragmentation and DF set |
+  | `PKT_TOO_SMALL` | 135 bad total length |
+  | `*INHDR*`, `*HDR_TRUNC*`, `*BAD_EXTHDR*`, `INVALID_PROTO` | 136 bad header |
+  | `*TTL*`, `*HOP_LIMIT*` | 137 bad TTL |
+  | `NEIGH_*` | 132 adjacency |
+  | `QDISC*`, `CPU_BACKLOG`, `FULL_RING`, `QUEUE_PURGE` | 139 queue (WRED) |
+  | `DEV_*` | 142 bad output interface |
+  | anything else (`NOT_SPECIFIED`, `NO_SOCKET`, …) or unresolved | 128 unknown |
+
+- **Failure isolation:** if the tracer cannot load or attach (no kernel BTF),
+  the agent logs a warning and runs flow collection without it.
+- **License:** reading the packet from kernel memory needs
+  `bpf_probe_read_kernel`, a GPL-only helper, so the eBPF program is
+  GPL-2.0-only. The agent and the shared `obserwrt-flow.h` stay Apache-2.0.
+
 ## 8. Exporters
 
 Exporters consume normalized observations:
@@ -351,6 +404,7 @@ flowDirection                         # 0 ingress, 1 egress
 flowEndReason                         # 1 idle timeout (expired), 2 active re-export
 samplingInterval                      # always 1: every packet is accounted
 vlanId                                # §5.2 vlan_id
+forwardingStatus                      # 0 unknown (flows), 128+ drop records (§7.1)
 ```
 
 `samplingInterval` is sent in every data record rather than in an options
@@ -427,6 +481,10 @@ two sources, split honestly between BPF truth and userspace:
   a plain PromQL alert. IPv6 Neighbor Discovery is IPv6 here (it is also in the
   flows as ICMPv6 type 133–137). Labels are per netdev, never per flow; the
   counters restart from zero when a device is re-attached (counter reset).
+- **drop counters, BPF truth** (same `obserwrt_stats` array, 0 while drop
+  tracking is off): `obserwrt_drops_total` (kernel drops on attached devices)
+  and `obserwrt_drops_unparsed_total` (the subset not exported as records,
+  §7.1).
 - **counters, userspace**: `obserwrt_flows_exported_total`, `obserwrt_export_errors_total`.
 - **gauges**: `obserwrt_flows_active`, `obserwrt_bpf_map_entries`,
   `obserwrt_bpf_map_limit` (baked to the built map size), `obserwrt_devices_attached`,
@@ -461,8 +519,9 @@ implicit attach-to-everything default**. No per-interface sections until a real
 need for differing per-device behavior exists.
 
 The per-protocol idle timeouts (`tcp_timeout`/`udp_timeout`/`icmp_timeout`/
-`general_timeout`) and the flow-map capacity (`max_flows`, 0 = the baked
-4096-entry default) live in the `main` section; the per-router IPFIX
+`general_timeout`), the flow-map capacity (`max_flows`, 0 = the baked
+4096-entry default) and drop tracking (`track_drops`, §7.1, default off) live in
+the `main` section; the per-router IPFIX
 `observation_domain` lives in the exporter section, so each router can carve
 out its own domain for multi-collector deployments.
 
@@ -479,6 +538,7 @@ config obserwrt 'main'
     option icmp_timeout '30'
     option general_timeout '10'
     # option max_flows '4096'      # LRU flow-map capacity; 0 = baked-in default
+    # option track_drops '1'       # record kernel drops (§7.1); default off
     # option log_level 'debug'     # error|warning|notice|info|debug
     # option prometheus_textfile '/run/prometheus/textfile/obserwrt.prom'  # unset = disabled
     option prometheus_interval '20'
@@ -510,6 +570,7 @@ udp_timeout = 60
 icmp_timeout = 30
 general_timeout = 10
 # max_flows = 4096        # LRU flow-map capacity; 0 = baked-in default
+# track_drops = false     # record kernel drops (§7.1)
 # log_level = notice      # error, warning, notice, info, debug
 # prometheus_textfile = /run/prometheus/textfile/obserwrt.prom
 prometheus_interval = 20
@@ -720,3 +781,4 @@ Fixes found by checking the live data in Akvorado:
 | VLAN | outer VID as flow-value enrichment (§4, §5.2), also in the syslog record |
 | Map walk | batched `BPF_MAP_LOOKUP_BATCH` read of keys + values; no restart under LRU churn, one syscall per batch instead of two per flow |
 | Device counters | `obserwrt_device_{packets,bytes}_total{ifname,direction,class}` (ipv4/ipv6/arp/other), §9 |
+| Drops | optional `tp_btf/kfree_skb` tracer (`track_drops`), drop records with `forwardingStatus` 128+ (IE 89, 18 fields), reason names from kernel BTF; eBPF program relicensed GPL-2.0-only (§7.1) |
