@@ -291,7 +291,8 @@ bool batch_read(int fd, std::vector<K> &keys, std::vector<V> &values, bool drain
 	uint32_t in_batch = 0;
 	uint32_t out_batch = 0;
 	bool first = true;
-	LIBBPF_OPTS(bpf_map_batch_opts, opts);
+	bpf_map_batch_opts opts{}; /* zeroed: no elem/map flags */
+	opts.sz = sizeof(opts);
 
 	for (;;) {
 		auto count = static_cast<uint32_t>(kb.size());
