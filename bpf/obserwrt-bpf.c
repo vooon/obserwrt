@@ -128,6 +128,28 @@ ext_next(__u8 *data_end, __u8 **l4, int ah)
 	return nh;
 }
 
+/* Outer VLAN id of an Ethernet frame, 0 if untagged. An offloaded (stripped)
+ * tag lives in skb metadata and is the outer one; otherwise the first
+ * in-packet 802.1Q/802.1ad tag. Read only when a flow is created, not while
+ * parsing: carrying it through the parser doubles the verifier's states
+ * across the IPv6 extension-header walk. */
+static __always_inline __u16
+outer_vlan(struct __sk_buff *skb)
+{
+	__u8 *data = (__u8 *)(__u64)skb->data;
+	__u8 *data_end = (__u8 *)(__u64)skb->data_end;
+	__u16 et;
+
+	if (skb->vlan_present)
+		return skb->vlan_tci & 0x0fff;
+	if (data + 18 > data_end)
+		return 0;
+	et = bpf_ntohs(*(__u16 *)(data + 12));
+	if (et != ETH_P_8021Q && et != ETH_P_8021AD && et != 0x9100)
+		return 0;
+	return bpf_ntohs(*(__u16 *)(data + 14)) & 0x0fff;
+}
+
 /*
  * Observe a packet seen at `direction` on the device the TC filter is attached
  * to. `eth` (a compile-time constant per program) selects the framing.
@@ -146,7 +168,6 @@ observe(struct __sk_buff *skb, __u8 direction, const int eth)
 	__u32 frag_off = 0;   /* !=0 means a non-first fragment: no L4 */
 	__u32 l4hdr = 0;      /* L4 header bytes repeated in every GSO segment */
 	__u32 segs, l3len;
-	__u16 vlan = 0;       /* outer VLAN id (Ethernet only), value enrichment */
 	int have_l4 = 0;
 
 	/* A GRO/TSO super-packet stands for gso_segs wire packets. */
@@ -171,18 +192,11 @@ observe(struct __sk_buff *skb, __u8 direction, const int eth)
 		if (p + 14 > data_end)
 			return TC_ACT_OK;
 
-		/* An offloaded (stripped) tag lives in skb metadata and is the
-		 * outer one; otherwise take the first in-packet tag below. */
-		if (skb->vlan_present)
-			vlan = skb->vlan_tci & 0x0fff;
-
 		et = bpf_ntohs(*(__u16 *)(p + 12));
 		l3off = ETH_HLEN;
 		if (et == ETH_P_8021Q || et == ETH_P_8021AD || et == 0x9100) {
 			if (p + 18 > data_end)
 				return TC_ACT_OK;
-			if (!vlan)
-				vlan = bpf_ntohs(*(__u16 *)(p + 14)) & 0x0fff;
 			et = bpf_ntohs(*(__u16 *)(p + 16));
 			l3off = ETH_HLEN + 4;
 			if (et == ETH_P_8021Q || et == ETH_P_8021AD) {
@@ -333,7 +347,8 @@ observe(struct __sk_buff *skb, __u8 direction, const int eth)
 		nv.first_seen = now;
 		nv.last_seen = now;
 		nv.tcp_flags = tcpf;
-		nv.vlan_id = vlan;    /* VLAN is not identity (§4): first packet's */
+		if (eth)              /* VLAN is not identity (§4): first packet's */
+			nv.vlan_id = outer_vlan(skb);
 		if (bpf_map_update_elem(&obserwrt_flows, &key, &nv, BPF_ANY) == 0)
 			stat_add(STAT_FLOWS_CREATED, 1);
 	}
