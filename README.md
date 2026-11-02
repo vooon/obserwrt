@@ -68,6 +68,7 @@ src-git obserwrt https://github.com/vooon/obserwrt.git
 ## License
 
 The agent and the shared flow header (`bpf/obserwrt-flow.h`) are Apache-2.0
-([LICENSE](LICENSE)). The eBPF program (`bpf/obserwrt-bpf.c`) is
-GPL-2.0-only: its drop tracer uses kernel helpers that are available only to
+([LICENSE](LICENSE)). The eBPF programs (`bpf/obserwrt-bpf.c`,
+`bpf/obserwrt-drops.c` and their shared `bpf/obserwrt-bpf.h`) are
+GPL-2.0-only: they use kernel helpers that are available only to
 GPL-compatible eBPF programs.

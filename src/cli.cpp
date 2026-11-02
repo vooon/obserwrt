@@ -60,7 +60,8 @@ void print_usage(FILE *out)
 		     "  -V, --version        Show build/version info and exit\n"
 		     "  -c, --config PATH    Config file to read (default: %.*s)\n"
 		     "  -o, --bpf-object PATH\n"
-		     "                       Path to obserwrt-bpf.o (default: $BPF_OBJ or %.*s)\n",
+		     "                       Path to obserwrt-bpf.o (default: $BPF_OBJ or %.*s);\n"
+		     "                       obserwrt-drops.o is looked up beside it\n",
 		     (int)Cli::default_config_path().size(), Cli::default_config_path().data(),
 		     (int)Cli::default_bpf_object().size(), Cli::default_bpf_object().data());
 }

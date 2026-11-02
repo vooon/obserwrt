@@ -63,8 +63,10 @@ deliberate, incompatible intent (see design §4/§5/§6/§8):
 
 Running the OpenWrt package: `libbpf`, `libuci`, `libstdcpp`. Plain Linux:
 `libbpf1`, `libstdc++6`. Vendored single headers: `nlohmann/json`,
-`inifile-cpp` (MIT). The eBPF object is built from source — via
-`include/bpf.mk` (OpenWrt) or clang (Linux CMake) — never checked in.
+`inifile-cpp` (MIT). The two eBPF objects (`obserwrt-bpf.o`, the TC
+programs; `obserwrt-drops.o`, the drop tracer, opened only with
+`track_drops`) are built from source — via `include/bpf.mk` (OpenWrt) or
+clang (Linux CMake) — never checked in.
 
 ## Layout
 
@@ -83,7 +85,8 @@ Source map (see design §11 for the full feed layout):
 | `src/config_uci.cpp` / `src/config_mini.cpp` | UCI / INI config backends |
 | `src/udp_client.cpp` | dual-stack (v4/v6) remote UDP endpoint |
 | `src/log.hpp` / `src/version.hpp` | DAEMON_LOG, build_info |
-| `bpf/obserwrt-bpf.c` / `bpf/obserwrt-flow.h` | eBPF program (GPL-2.0-only) + shared §5 header (Apache-2.0) |
+| `bpf/obserwrt-bpf.c` / `bpf/obserwrt-drops.c` / `bpf/obserwrt-bpf.h` | eBPF TC programs (no CO-RE) / drop tracer (CO-RE, own object) / shared stats map + helpers (all GPL-2.0-only) |
+| `bpf/obserwrt-flow.h` | shared §5 key/value header (Apache-2.0) |
 | `vendor/`, `linux/`, `obserwrt/files/` | headers, systemd unit/.conf, procd scripts |
 | `tests/`, `scripts/` | golden harness, eBPF test-run, goflow2 e2e emitter |
 
@@ -109,8 +112,10 @@ clang-tidy -p build -checks="-*,clang-analyzer-*,bugprone-*,-bugprone-easily-swa
 # Needs the system kernel UAPI + libbpf headers (linux-libc-dev, libbpf-dev):
 #   mkdir -p /tmp/bpfinc/uapi && ln -s /usr/include/linux /tmp/bpfinc/uapi/linux
 #   inc="-I/tmp/bpfinc -I/usr/include/x86_64-linux-gnu -I/usr/include"
-#   clang -O2 -g -target bpfel $inc -c bpf/obserwrt-bpf.c -o /tmp/bpfel.o
-#   clang -O2 -g -target bpfeb $inc -c bpf/obserwrt-bpf.c -o /tmp/bpfeb.o
+#   for f in obserwrt-bpf obserwrt-drops; do
+#     clang -O2 -g -target bpfel $inc -c bpf/$f.c -o /tmp/$f-bpfel.o
+#     clang -O2 -g -target bpfeb $inc -c bpf/$f.c -o /tmp/$f-bpfeb.o
+#   done
 ```
 
 CI runs the native build/harness, the clang-format + clang-tidy gates, the eBPF
@@ -138,7 +143,7 @@ build/obserwrt -c linux/obserwrt.conf
 - **eBPF test-run** (`tests/bpf_run.cpp`, `ctest`, needs root; skipped
   unprivileged): loads the real object and runs crafted frames through it via
   `BPF_PROG_TEST_RUN` — framing, GSO/L3-octet counts, VLAN, IPv6 HBH, per-device
-  classes, per-CPU stats, a real kernel drop (UDP to a closed port on lo). Run: `sudo build/obserwrt-bpf-run build/obserwrt-bpf.o`
+  classes, per-CPU stats, a real kernel drop (UDP to a closed port on lo). Run: `sudo build/obserwrt-bpf-run build/obserwrt-bpf.o build/obserwrt-drops.o`
 
 ## Conventions
 

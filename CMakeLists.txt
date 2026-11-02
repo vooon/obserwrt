@@ -133,17 +133,19 @@ target_compile_options(obserwrt PRIVATE ${OBSERWRT_CXX_FLAGS})
 
 install(TARGETS obserwrt RUNTIME DESTINATION bin)
 
-# ---------------- eBPF object (plain-Linux packages) ----------------
-# OpenWrt builds the .o via bpf.mk; on Linux the package must contain it at
-# the daemon's default path (/usr/lib/obserwrt/obserwrt-bpf.o). Build from
-# source with clang (same include shim the CI smoke uses).
+# ---------------- eBPF objects (plain-Linux packages) ----------------
+# OpenWrt builds the .o files via bpf.mk; on Linux the package must contain
+# them at the daemon's default path (/usr/lib/obserwrt/obserwrt-bpf.o, with
+# obserwrt-drops.o beside it). Build from source with clang (same include
+# shim the CI smoke uses).
 if(NOT OBSERWRT_USE_LIBUCI)
-  option(OBSERWRT_BUILD_BPF "Build obserwrt-bpf.o for the Linux packages" ON)
+  option(OBSERWRT_BUILD_BPF "Build the eBPF objects for the Linux packages" ON)
   if(OBSERWRT_BUILD_BPF)
     find_program(BPF_CLANG clang)
     if(BPF_CLANG)
       set(BPF_SHIM ${CMAKE_BINARY_DIR}/bpf-uapi)
       set(BPF_OBJECT ${CMAKE_BINARY_DIR}/obserwrt-bpf.o)
+      set(BPF_DROPS_OBJECT ${CMAKE_BINARY_DIR}/obserwrt-drops.o)
       set(BPF_INCS
         -I${BPF_SHIM}
         -I/usr/include
@@ -151,20 +153,29 @@ if(NOT OBSERWRT_USE_LIBUCI)
       if(CMAKE_LIBRARY_ARCHITECTURE)
         list(APPEND BPF_INCS -I/usr/include/${CMAKE_LIBRARY_ARCHITECTURE})
       endif()
-      add_custom_command(OUTPUT ${BPF_OBJECT}
+      # The uapi/ include shim once, so the two objects do not race for it.
+      add_custom_command(OUTPUT ${BPF_SHIM}/uapi.stamp
         COMMAND ${CMAKE_COMMAND} -E make_directory ${BPF_SHIM}/uapi
         COMMAND ${CMAKE_COMMAND} -E create_symlink /usr/include/linux
           ${BPF_SHIM}/uapi/linux
-        COMMAND ${BPF_CLANG} -O2 -g ${BPF_INCS}
-          -c ${CMAKE_CURRENT_SOURCE_DIR}/bpf/obserwrt-bpf.c
-          -o ${BPF_OBJECT}
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/bpf/obserwrt-bpf.c
-                ${CMAKE_CURRENT_SOURCE_DIR}/bpf/obserwrt-flow.h
-        COMMENT "Building obserwrt-bpf.o")
-      add_custom_target(obserwrt_bpf_o ALL DEPENDS ${BPF_OBJECT})
-      install(FILES ${BPF_OBJECT} DESTINATION lib/obserwrt)
+        COMMAND ${CMAKE_COMMAND} -E touch ${BPF_SHIM}/uapi.stamp
+        COMMENT "Preparing the BPF uapi include shim")
+      foreach(name IN ITEMS obserwrt-bpf obserwrt-drops)
+        add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/${name}.o
+          COMMAND ${BPF_CLANG} -O2 -g ${BPF_INCS}
+            -c ${CMAKE_CURRENT_SOURCE_DIR}/bpf/${name}.c
+            -o ${CMAKE_BINARY_DIR}/${name}.o
+          DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/bpf/${name}.c
+                  ${CMAKE_CURRENT_SOURCE_DIR}/bpf/obserwrt-bpf.h
+                  ${CMAKE_CURRENT_SOURCE_DIR}/bpf/obserwrt-flow.h
+                  ${BPF_SHIM}/uapi.stamp
+          COMMENT "Building ${name}.o")
+      endforeach()
+      add_custom_target(obserwrt_bpf_o ALL
+        DEPENDS ${BPF_OBJECT} ${BPF_DROPS_OBJECT})
+      install(FILES ${BPF_OBJECT} ${BPF_DROPS_OBJECT} DESTINATION lib/obserwrt)
     else()
-      message(WARNING "clang not found; obserwrt-bpf.o will not be built")
+      message(WARNING "clang not found; the eBPF objects will not be built")
     endif()
   endif()
 endif()
@@ -193,7 +204,8 @@ if(OBSERWRT_BUILD_TESTS)
     target_link_libraries(obserwrt-bpf-run PRIVATE obserwrt_core)
     target_compile_options(obserwrt-bpf-run PRIVATE ${OBSERWRT_CXX_FLAGS})
     add_dependencies(obserwrt-bpf-run obserwrt_bpf_o)
-    add_test(NAME bpf-test-run COMMAND obserwrt-bpf-run ${BPF_OBJECT})
+    add_test(NAME bpf-test-run
+      COMMAND obserwrt-bpf-run ${BPF_OBJECT} ${BPF_DROPS_OBJECT})
     set_tests_properties(bpf-test-run PROPERTIES SKIP_RETURN_CODE 77)
   endif()
 

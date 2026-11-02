@@ -4,6 +4,10 @@
  * libbpf 1.x lives here only; nothing else in the daemon touches the bpf
  * module. Flow-map keys/values are the raw §5 bytes; each pass snapshots the
  * whole map (keys AND values) with BPF_MAP_LOOKUP_BATCH.
+ *
+ * Two objects: obserwrt-bpf.o (TC flow observation, no CO-RE, loads on any
+ * kernel) and obserwrt-drops.o (the tp_btf/kfree_skb tracer, needs kernel
+ * BTF), opened only with track_drops and sharing the TC object's stats map.
  */
 
 #include "bpf.hpp"
@@ -47,41 +51,36 @@ Bpf::~Bpf()
 	}
 	if (drop_link_)
 		bpf_link__destroy(drop_link_);
+	if (drops_obj_)
+		bpf_object__close(drops_obj_);
 	if (obj_)
 		bpf_object__close(obj_);
 }
 
-bool Bpf::load(const std::string &path, uint32_t max_flows, bool track_drops, std::string *err,
-	       std::string *warn)
+bool Bpf::load(const std::string &path, const std::string &drops_path, uint32_t max_flows,
+	       bool track_drops, std::string *err, std::string *warn)
 {
 	if (warn)
 		warn->clear();
-	if (!open_load(path, max_flows, track_drops, err)) {
-		if (!track_drops)
-			return false;
-		/* The drop tracer is optional: never let it take flow collection
-		 * down (e.g. a kernel without BTF for tp_btf). Retry without it. */
-		if (warn)
-			*warn =
-			    "drop tracing disabled: " + (err ? *err : std::string("load failed"));
-		if (!open_load(path, max_flows, false, err))
-			return false;
-		return true;
-	}
+	if (!open_load(path, max_flows, err))
+		return false;
 	if (!track_drops)
 		return true;
 
-	drop_link_ = bpf_program__attach(prog_drop_);
-	if (!drop_link_) {
+	/* The drop tracer is optional and lives in its own object: a kernel
+	 * without BTF (its CO-RE relocations), or without the tracepoint, costs
+	 * the tracer and never flow collection (design §7.1). */
+	std::string derr;
+	if (!load_drops(drops_path, &derr)) {
 		if (warn)
-			*warn = "drop tracing disabled: " + libbpf_msg("attach tp_btf/kfree_skb");
+			*warn = "drop tracing disabled: " + derr;
 		return true;
 	}
 	drops_active_ = true;
 	return true;
 }
 
-bool Bpf::open_load(const std::string &path, uint32_t max_flows, bool with_drops, std::string *err)
+bool Bpf::open_load(const std::string &path, uint32_t max_flows, std::string *err)
 {
 	if (err)
 		err->clear();
@@ -96,18 +95,15 @@ bool Bpf::open_load(const std::string &path, uint32_t max_flows, bool with_drops
 	flows_ = bpf_object__find_map_by_name(obj_, "obserwrt_flows");
 	stats_ = bpf_object__find_map_by_name(obj_, "obserwrt_stats");
 	devstats_ = bpf_object__find_map_by_name(obj_, "obserwrt_devstats");
-	attached_ = bpf_object__find_map_by_name(obj_, "obserwrt_attached");
-	drops_ = bpf_object__find_map_by_name(obj_, "obserwrt_drops");
-	prog_drop_ = bpf_object__find_program_by_name(obj_, "obserwrt_kfree_skb");
 	prog_ingress_[0] = bpf_object__find_program_by_name(obj_, "obserwrt_ingress_l3");
 	prog_egress_[0] = bpf_object__find_program_by_name(obj_, "obserwrt_egress_l3");
 	prog_ingress_[1] = bpf_object__find_program_by_name(obj_, "obserwrt_ingress_eth");
 	prog_egress_[1] = bpf_object__find_program_by_name(obj_, "obserwrt_egress_eth");
-	if (!flows_ || !stats_ || !devstats_ || !attached_ || !drops_ || !prog_drop_ ||
-	    !prog_ingress_[0] || !prog_egress_[0] || !prog_ingress_[1] || !prog_egress_[1]) {
+	if (!flows_ || !stats_ || !devstats_ || !prog_ingress_[0] || !prog_egress_[0] ||
+	    !prog_ingress_[1] || !prog_egress_[1]) {
 		if (err)
 			*err = "obserwrt-bpf.o: missing map/program (flows/stats/devstats/"
-			       "attached/drops/{ingress,egress}_{l3,eth}/kfree_skb)";
+			       "{ingress,egress}_{l3,eth})";
 		bpf_object__close(obj_);
 		obj_ = nullptr;
 		return false;
@@ -137,9 +133,6 @@ bool Bpf::open_load(const std::string &path, uint32_t max_flows, bool with_drops
 		bpf_program__set_expected_attach_type(prog_ingress_[i], BPF_TCX_INGRESS);
 		bpf_program__set_expected_attach_type(prog_egress_[i], BPF_TCX_EGRESS);
 	}
-	/* The tp_btf drop tracer is loaded only when drop tracking is on. */
-	bpf_program__set_autoload(prog_drop_, with_drops);
-
 	if (bpf_object__load(obj_) != 0) {
 		if (err)
 			*err = libbpf_msg("bpf_object__load");
@@ -148,6 +141,61 @@ bool Bpf::open_load(const std::string &path, uint32_t max_flows, bool with_drops
 		return false;
 	}
 	return true;
+}
+
+bool Bpf::load_drops(const std::string &path, std::string *err)
+{
+	drops_obj_ = bpf_object__open_file(path.c_str(), nullptr);
+	if (!drops_obj_) {
+		*err = libbpf_msg(("open " + path).c_str());
+		return false;
+	}
+
+	bpf_map *stats = bpf_object__find_map_by_name(drops_obj_, "obserwrt_stats");
+	attached_ = bpf_object__find_map_by_name(drops_obj_, "obserwrt_attached");
+	drops_ = bpf_object__find_map_by_name(drops_obj_, "obserwrt_drops");
+	prog_drop_ = bpf_object__find_program_by_name(drops_obj_, "obserwrt_kfree_skb");
+	if (!stats || !attached_ || !drops_ || !prog_drop_) {
+		*err = path + ": missing map/program (stats/attached/drops/kfree_skb)";
+		close_drops();
+		return false;
+	}
+
+	/* One stats map for both objects: the tracer's STAT_DROPS slots land in
+	 * the TC object's map, which bpf_stats() reads. */
+	if (bpf_map__reuse_fd(stats, bpf_map__fd(stats_)) != 0) {
+		*err = libbpf_msg("bpf_map__reuse_fd obserwrt_stats");
+		close_drops();
+		return false;
+	}
+	if (bpf_object__load(drops_obj_) != 0) {
+		*err = libbpf_msg(("load " + path).c_str());
+		close_drops();
+		return false;
+	}
+	drop_link_ = bpf_program__attach(prog_drop_);
+	if (!drop_link_) {
+		*err = libbpf_msg("attach tp_btf/kfree_skb");
+		close_drops();
+		return false;
+	}
+	return true;
+}
+
+void Bpf::close_drops()
+{
+	if (drop_link_) {
+		bpf_link__destroy(drop_link_);
+		drop_link_ = nullptr;
+	}
+	if (drops_obj_) {
+		bpf_object__close(drops_obj_);
+		drops_obj_ = nullptr;
+	}
+	attached_ = nullptr;
+	drops_ = nullptr;
+	prog_drop_ = nullptr;
+	drops_active_ = false;
 }
 
 bool Bpf::attach(uint32_t ifindex, bool ethernet, std::string *err)
@@ -165,10 +213,6 @@ bool Bpf::attach(uint32_t ifindex, bool ethernet, std::string *err)
 	 * be a reused one whose old entries were not dropped). */
 	if (!l.in && !l.eg)
 		drop_dev_counters(ifindex);
-
-	/* Mark the device observed for the drop tracer (harmless when off). */
-	const uint8_t one = 1;
-	bpf_map__update_elem(attached_, &ifindex, sizeof(ifindex), &one, sizeof(one), BPF_ANY);
 
 	if (!l.in) {
 		l.in = bpf_program__attach_tcx(prog_ingress_[ethernet], static_cast<int>(ifindex),
@@ -189,6 +233,15 @@ bool Bpf::attach(uint32_t ifindex, bool ethernet, std::string *err)
 				*err = libbpf_msg("attach_tcx egress");
 			return false;
 		}
+	}
+
+	/* Both hooks are live: now mark the device observed for the drop tracer.
+	 * Earlier, a failed attach would leave a device that collects no flows
+	 * still producing drop records. */
+	if (attached_) {
+		const uint8_t one = 1;
+		bpf_map__update_elem(attached_, &ifindex, sizeof(ifindex), &one, sizeof(one),
+				     BPF_ANY);
 	}
 	return true;
 }
@@ -276,16 +329,15 @@ namespace
 {
 
 /* Walk a hash map with BPF_MAP_LOOKUP_BATCH (or LOOKUP_AND_DELETE_BATCH when
- * `drain`). The hash-map batch walk advances bucket by bucket (the token is a
- * u32 bucket index), so LRU eviction during the walk cannot restart it the
- * way a vanished get_next_key() cursor does: every key that stays in the map
- * is visited once, and the walk always terminates. */
-template <typename K, typename V>
-bool batch_read(int fd, std::vector<K> &keys, std::vector<V> &values, bool drain)
+ * `drain`), handing every batch to `on_batch(keys, values, count)`. The
+ * hash-map batch walk advances bucket by bucket (the token is a u32 bucket
+ * index), so LRU eviction during the walk cannot restart it the way a
+ * vanished get_next_key() cursor does: every key that stays in the map is
+ * visited once, and the walk always terminates. False on a map error; the
+ * batches delivered before it stay delivered (a drain has already removed
+ * them from the kernel map). */
+template <typename K, typename V, typename F> bool batch_walk(int fd, bool drain, F &&on_batch)
 {
-	keys.clear();
-	values.clear();
-
 	std::vector<K> kb(256);
 	std::vector<V> vb(kb.size());
 	uint32_t in_batch = 0;
@@ -312,14 +364,26 @@ bool batch_read(int fd, std::vector<K> &keys, std::vector<V> &values, bool drain
 		if (e != 0 && e != ENOENT)
 			return false;
 
-		keys.insert(keys.end(), kb.begin(), kb.begin() + count);
-		values.insert(values.end(), vb.begin(), vb.begin() + count);
+		on_batch(kb.data(), vb.data(), count);
 
 		if (e == ENOENT) /* walked past the last bucket */
 			return true;
 		in_batch = out_batch;
 		first = false;
 	}
+}
+
+/* Collect a whole map into parallel key/value vectors. On a failure partway
+ * the vectors hold what was read so far. */
+template <typename K, typename V>
+bool batch_read(int fd, std::vector<K> &keys, std::vector<V> &values, bool drain)
+{
+	keys.clear();
+	values.clear();
+	return batch_walk<K, V>(fd, drain, [&](const K *k, const V *v, uint32_t n) {
+		keys.insert(keys.end(), k, k + n);
+		values.insert(values.end(), v, v + n);
+	});
 }
 
 } /* namespace */
@@ -372,14 +436,20 @@ bool Bpf::erase(const FlowKey &key) const
 
 void Bpf::purge_ifindex(uint32_t ifindex)
 {
-	std::vector<FlowKey> keys;
-	std::vector<FlowValue> values;
-	if (!snapshot(keys, values))
+	if (!flows_)
 		return;
-	for (const FlowKey &k : keys) {
-		if (k.ifindex == ifindex)
-			erase(k);
-	}
+	/* Keep only the device's keys: a full snapshot would copy every flow
+	 * value for nothing on each device detach. Erase after the walk, and
+	 * what a failed walk already found still goes. */
+	std::vector<FlowKey> victims;
+	batch_walk<FlowKey, FlowValue>(bpf_map__fd(flows_), false,
+				       [&](const FlowKey *k, const FlowValue *, uint32_t n) {
+					       for (uint32_t i = 0; i < n; i++)
+						       if (k[i].ifindex == ifindex)
+							       victims.push_back(k[i]);
+				       });
+	for (const FlowKey &k : victims)
+		erase(k);
 }
 
 uint32_t Bpf::map_limit() const

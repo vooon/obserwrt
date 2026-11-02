@@ -397,8 +397,8 @@ void test_drops(const Ctx &c)
 
 int main(int argc, char **argv)
 {
-	if (argc != 2) {
-		std::fprintf(stderr, "usage: %s <obserwrt-bpf.o>\n", argv[0]);
+	if (argc != 3) {
+		std::fprintf(stderr, "usage: %s <obserwrt-bpf.o> <obserwrt-drops.o>\n", argv[0]);
 		return 2;
 	}
 	struct bpf_object *obj = bpf_object__open_file(argv[1], nullptr);
@@ -429,12 +429,33 @@ int main(int argc, char **argv)
 	c.flows = bpf_object__find_map_fd_by_name(obj, "obserwrt_flows");
 	c.stats = bpf_object__find_map_fd_by_name(obj, "obserwrt_stats");
 	c.devstats = bpf_object__find_map_fd_by_name(obj, "obserwrt_devstats");
-	c.attached = bpf_object__find_map_fd_by_name(obj, "obserwrt_attached");
-	c.drops = bpf_object__find_map_fd_by_name(obj, "obserwrt_drops");
-	c.drop_prog = bpf_object__find_program_by_name(obj, "obserwrt_kfree_skb");
-	if (c.ingress < 0 || c.flows < 0 || c.stats < 0 || c.devstats < 0 || c.attached < 0 ||
-	    c.drops < 0 || !c.drop_prog) {
+	if (c.ingress < 0 || c.flows < 0 || c.stats < 0 || c.devstats < 0) {
 		std::fprintf(stderr, "obserwrt-bpf.o: missing program/map\n");
+		bpf_object__close(obj);
+		return 2;
+	}
+
+	/* The drop tracer object, with the stats map shared the way the agent
+	 * does it (bpf_map__reuse_fd before load). */
+	struct bpf_object *dobj = bpf_object__open_file(argv[2], nullptr);
+	if (!dobj) {
+		std::fprintf(stderr, "open %s: %s\n", argv[2], std::strerror(errno));
+		bpf_object__close(obj);
+		return 2;
+	}
+	struct bpf_map *dstats = bpf_object__find_map_by_name(dobj, "obserwrt_stats");
+	if (!dstats || bpf_map__reuse_fd(dstats, c.stats) != 0 || bpf_object__load(dobj) != 0) {
+		std::fprintf(stderr, "load %s: %s\n", argv[2], std::strerror(errno));
+		bpf_object__close(dobj);
+		bpf_object__close(obj);
+		return 2;
+	}
+	c.attached = bpf_object__find_map_fd_by_name(dobj, "obserwrt_attached");
+	c.drops = bpf_object__find_map_fd_by_name(dobj, "obserwrt_drops");
+	c.drop_prog = bpf_object__find_program_by_name(dobj, "obserwrt_kfree_skb");
+	if (c.attached < 0 || c.drops < 0 || !c.drop_prog) {
+		std::fprintf(stderr, "obserwrt-drops.o: missing program/map\n");
+		bpf_object__close(dobj);
 		bpf_object__close(obj);
 		return 2;
 	}
@@ -448,6 +469,7 @@ int main(int argc, char **argv)
 	test_dev_counters(c);
 	test_drops(c);
 	test_read_flows(c);
+	bpf_object__close(dobj);
 	bpf_object__close(obj);
 
 	if (g_failures != 0) {
