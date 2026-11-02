@@ -17,6 +17,7 @@
 #include <linux/bpf.h>
 
 #include <cerrno>
+#include <cstdio>
 #include <cstring>
 
 namespace obserwrt
@@ -198,8 +199,10 @@ void Bpf::close_drops()
 	drops_active_ = false;
 }
 
-bool Bpf::attach(uint32_t ifindex, bool ethernet, std::string *err)
+bool Bpf::attach(uint32_t ifindex, bool ethernet, std::string *err, std::string *warn)
 {
+	if (warn)
+		warn->clear();
 	if (ifindex == 0) {
 		if (err)
 			*err = "attach: invalid ifindex";
@@ -240,10 +243,47 @@ bool Bpf::attach(uint32_t ifindex, bool ethernet, std::string *err)
 	 * still producing drop records. */
 	if (attached_) {
 		const uint8_t one = 1;
-		bpf_map__update_elem(attached_, &ifindex, sizeof(ifindex), &one, sizeof(one),
-				     BPF_ANY);
+		if (bpf_map__update_elem(attached_, &ifindex, sizeof(ifindex), &one, sizeof(one),
+					 BPF_ANY) != 0 &&
+		    warn)
+			*warn = "obserwrt_attached full: drops on this device are not recorded";
+	}
+
+	/* The per-device counters map holds DEV_MAP_ENTRIES entries, two per
+	 * device, and the eBPF side cannot report a failed insert: say so here,
+	 * while there is still headroom, instead of silently missing series. */
+	if (warn) {
+		const uint32_t cap = bpf_map__max_entries(devstats_) / 2;
+		const uint32_t live = live_count();
+		char buf[160];
+		if (live > cap) {
+			std::snprintf(buf, sizeof(buf),
+				      "obserwrt_devstats full: %u devices attached, map holds %u; "
+				      "per-device counters are not measured for all of them",
+				      live, cap);
+		} else if (cap > 0 && live * 10 >= cap * 9) {
+			std::snprintf(buf, sizeof(buf),
+				      "obserwrt_devstats near capacity: %u of %u devices", live,
+				      cap);
+		} else {
+			buf[0] = '\0';
+		}
+		if (buf[0] != '\0') {
+			if (!warn->empty())
+				*warn += "; ";
+			*warn += buf;
+		}
 	}
 	return true;
+}
+
+uint32_t Bpf::live_count() const
+{
+	uint32_t n = 0;
+	for (const auto &kv : atts_)
+		if (kv.second.in && kv.second.eg)
+			n++;
+	return n;
 }
 
 void Bpf::detach(uint32_t ifindex)
