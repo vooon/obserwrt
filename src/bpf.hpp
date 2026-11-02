@@ -34,12 +34,14 @@ class Bpf
 	Bpf(const Bpf &) = delete;
 	Bpf &operator=(const Bpf &) = delete;
 
-	/* Open the object, set the SCHED_CLS/TCX program types, size the flow map
-	 * (`max_flows` == 0 keeps the baked-in default) and load. With
-	 * `track_drops`, also load + attach the tp_btf/kfree_skb drop tracer; if
-	 * that fails, flow collection still loads and `*warn` says why. */
-	bool load(const std::string &object_path, uint32_t max_flows, bool track_drops,
-		  std::string *err, std::string *warn = nullptr);
+	/* Open the TC object, set the SCHED_CLS/TCX program types, size the flow
+	 * map (`max_flows` == 0 keeps the baked-in default) and load. With
+	 * `track_drops`, also open, load and attach the tp_btf/kfree_skb drop
+	 * tracer from its own object (`drops_object_path`, sharing the stats
+	 * map); if that fails, flow collection still runs and `*warn` says why. */
+	bool load(const std::string &object_path, const std::string &drops_object_path,
+		  uint32_t max_flows, bool track_drops, std::string *err,
+		  std::string *warn = nullptr);
 
 	/* True when the drop tracer is loaded and attached. */
 	bool drops_active() const
@@ -47,7 +49,9 @@ class Bpf
 		return drops_active_;
 	}
 
-	/* Drain the drop map (lookup-and-delete): the drops since the last call. */
+	/* Drain the drop map (lookup-and-delete): the drops since the last call.
+	 * False on a map error partway; the vectors then hold the entries already
+	 * removed from the kernel, which the caller must still export. */
 	bool take_drops(std::vector<DropKey> &keys, std::vector<FlowValue> &values) const;
 
 	bool loaded() const
@@ -97,10 +101,12 @@ class Bpf
 		bpf_link *eg = nullptr;
 	};
 
-	bpf_object *obj_ = nullptr;
+	bpf_object *obj_ = nullptr; /* obserwrt-bpf.o: TC programs + flow maps */
 	bpf_map *flows_ = nullptr;
 	bpf_map *stats_ = nullptr;
 	bpf_map *devstats_ = nullptr;
+	/* obserwrt-drops.o (track_drops only): the tracer and its maps. */
+	bpf_object *drops_obj_ = nullptr;
 	bpf_map *attached_ = nullptr;
 	bpf_map *drops_ = nullptr;
 	bpf_program *prog_drop_ = nullptr;
@@ -112,8 +118,11 @@ class Bpf
 	std::map<uint32_t, Links> atts_; /* ifindex -> live tcx links */
 	std::string last_error_;
 
-	bool open_load(const std::string &path, uint32_t max_flows, bool with_drops,
-		       std::string *err);
+	bool open_load(const std::string &path, uint32_t max_flows, std::string *err);
+	/* Open + load + attach the drop tracer object, with `obserwrt_stats`
+	 * reused from the TC object. On failure nothing of it stays. */
+	bool load_drops(const std::string &path, std::string *err);
+	void close_drops();
 
 	/* Delete a device's class counters (both directions). */
 	void drop_dev_counters(uint32_t ifindex) const;
@@ -128,7 +137,8 @@ bool read_dev_counters(int fd, std::vector<DevCounters> &out);
  * for the eBPF test-run (tests/bpf_run.cpp). */
 bool read_flows(int fd, std::vector<FlowKey> &keys, std::vector<FlowValue> &values);
 
-/* Drain a drop map (fd) with BPF_MAP_LOOKUP_AND_DELETE_BATCH. Exposed for
+/* Drain a drop map (fd) with BPF_MAP_LOOKUP_AND_DELETE_BATCH. False on a map
+ * error partway; the vectors keep the entries drained before it. Exposed for
  * tests/bpf_run.cpp. */
 bool drain_drops(int fd, std::vector<DropKey> &keys, std::vector<FlowValue> &values);
 

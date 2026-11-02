@@ -344,8 +344,14 @@ produces one drop record per scanned tuple.
   | `DEV_*` | 142 bad output interface |
   | anything else (`NOT_SPECIFIED`, `NO_SOCKET`, …) or unresolved | 128 unknown |
 
-- **Failure isolation:** if the tracer cannot load or attach (no kernel BTF),
-  the agent logs a warning and runs flow collection without it.
+- **Failure isolation:** the tracer is its own object, `obserwrt-drops.o`,
+  opened only with `track_drops` and loaded with the TC object's
+  `obserwrt_stats` map fd reused. Its CO-RE struct views make libbpf require
+  the running kernel's BTF for that object, and libbpf checks that per
+  object, not per program, so the tracer cannot share the TC object without
+  dragging the requirement onto flow collection. If it cannot load or attach
+  (no kernel BTF, no tracepoint), the agent logs a warning and runs flow
+  collection without it. `obserwrt-bpf.o` carries no CO-RE relocations.
 - **License:** reading the packet from kernel memory needs
   `bpf_probe_read_kernel`, a GPL-only helper, so the eBPF program is
   GPL-2.0-only. The agent and the shared `obserwrt-flow.h` stay Apache-2.0.
@@ -625,8 +631,10 @@ obserwrt/ ## feed root, also an OpenWrt package
         config_uci.cpp ## UCI backend (OpenWrt)
         config_mini.cpp ## INI backend (plain Linux)
         udp_client.cpp ## dual-stack remote UDP endpoint
-    bpf/ ## eBPF program + shared §5 flow layout
-        obserwrt-bpf.c ## TC ingress/egress flow observation
+    bpf/ ## eBPF programs + shared §5 flow layout
+        obserwrt-bpf.c ## TC ingress/egress flow observation (no CO-RE)
+        obserwrt-drops.c ## tp_btf/kfree_skb drop tracer (CO-RE, needs kernel BTF)
+        obserwrt-bpf.h ## stats map + helpers shared by both objects
         obserwrt-flow.h ## flow_key/flow_val PODs (single source)
     vendor/ ## 3rd-party headers (nlohmann/json, inifile-cpp)
     linux/ ## systemd unit + .conf for the plain-Linux .deb
@@ -640,9 +648,9 @@ obserwrt/ ## feed root, also an OpenWrt package
 ```
 
 - Dependencies (OpenWrt): `libbpf`, `libuci`, `libstdcpp` (+ runtime eBPF
-  support as needed). On plain Linux: `libbpf1`, `libstdc++6`. The eBPF object
-  is built on-device-from-source via `include/bpf.mk` (OpenWrt) or clang
-  (Linux CMake), not checked in as a binary.
+  support as needed). On plain Linux: `libbpf1`, `libstdc++6`. The eBPF
+  objects are built from source via `include/bpf.mk` (OpenWrt) or clang
+  (Linux CMake), not checked in as binaries.
 - procd service: starts at boot, respawns on failure, does not fail when
   configured devices are absent.
 - No auto-attach to every interface after installation.

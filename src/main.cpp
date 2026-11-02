@@ -111,6 +111,11 @@ int main(int argc, char **argv)
 		const char *env = getenv("BPF_OBJ");
 		bpf_object = env ? env : std::string(obserwrt::Cli::default_bpf_object());
 	}
+	/* The drop tracer object is installed beside the TC object. */
+	const size_t slash = bpf_object.rfind('/');
+	const std::string bpf_drops =
+	    (slash == std::string::npos ? std::string() : bpf_object.substr(0, slash + 1)) +
+	    "obserwrt-drops.o";
 
 	std::string err;
 	const obserwrt::Config cfg = obserwrt::load_config(config_path, &err);
@@ -147,7 +152,7 @@ int main(int argc, char **argv)
 
 	obserwrt::Bpf bpf;
 	std::string warn;
-	if (!bpf.load(bpf_object, cfg.max_flows, cfg.track_drops, &err, &warn)) {
+	if (!bpf.load(bpf_object, bpf_drops, cfg.max_flows, cfg.track_drops, &err, &warn)) {
 		SLOG(LOG_ERR, "bpf load failed")("error", err);
 		return 1;
 	}
@@ -235,8 +240,8 @@ int main(int argc, char **argv)
 	if (!cfg.ipfix.enabled && !syslog_active)
 		SLOG(LOG_WARNING, "no exporters enabled");
 
-	SLOG(LOG_INFO, "started")("config", config_path)("bpf", bpf_object)("devices",
-									    cfg.devices.size())(
+	SLOG(LOG_INFO, "started")("config", config_path)("bpf", bpf_object)(
+	    "drops", bpf.drops_active() ? bpf_drops.c_str() : "off")("devices", cfg.devices.size())(
 	    "ipfix", cfg.ipfix.enabled ? "on" : "off")("syslog", syslog_active ? "on" : "off")(
 	    "metrics", metrics.active() ? cfg.prometheus_textfile.c_str() : "off");
 
@@ -321,8 +326,16 @@ int main(int argc, char **argv)
 						    syslog.emit(k, v, expired, &delta);
 				    });
 				/* Drop records: drained per pass, so each covers the
-				 * drops since the previous one (no delta tracking). */
-				if (bpf.drops_active() && bpf.take_drops(drop_keys, drop_vals)) {
+				 * drops since the previous one (no delta tracking). A
+				 * drain that fails partway has already removed what it
+				 * returned from the kernel map: export it regardless. */
+				if (bpf.drops_active()) {
+					if (!bpf.take_drops(drop_keys, drop_vals)) {
+						const int e = errno;
+						SLOG(LOG_WARNING, "drop map drain failed")(
+						    "error", std::strerror(e))("records",
+									       drop_keys.size());
+					}
 					for (size_t i = 0; i < drop_keys.size(); i++) {
 						const auto r =
 						    drop_reasons.lookup(drop_keys[i].reason);

@@ -17,8 +17,8 @@ include $(INCLUDE_DIR)/cmake.mk
 include $(INCLUDE_DIR)/bpf.mk
 
 # Root CMakeLists.txt + C++ sources live repo-root (feed root); the shared
-# flow header + eBPF source live in the bpf/ dir. Assemble both into the
-# package build dir; the BPF object is built on-device-from-source via bpf.mk
+# flow header + eBPF sources live in the bpf/ dir. Assemble both into the
+# package build dir; the BPF objects are built from source via bpf.mk
 # (never checked in) - see Build/Compile below.
 define Build/Prepare
 	mkdir -p $(PKG_BUILD_DIR)
@@ -39,10 +39,11 @@ CMAKE_OPTIONS += \
 	-DOBSERWRT_BUILD_TESTS=OFF \
 	-DCMAKE_CXX_FLAGS_RELEASE=""
 
-# The daemon is built by CMake (Build/Compile/Default); the eBPF object is
-# compiled from source by bpf.mk's CompileBPF. No FLOW_MAP_ENTRIES define is
-# passed: obserwrt-bpf.c defaults to 4096, and the daemon's runtime
-# `max_flows` overrides it at load (max_flows=0 stays the 4k baked default).
+# The daemon is built by CMake (Build/Compile/Default); the two eBPF objects
+# (TC flow observation + the drop tracer, design §7.1) are compiled from
+# source by bpf.mk's CompileBPF. No FLOW_MAP_ENTRIES define is passed:
+# obserwrt-bpf.c defaults to 4096, and the daemon's runtime `max_flows`
+# overrides it at load (max_flows=0 stays the 4k baked default).
 #
 # `-target $(BPF_TARGET)`: CompileBPF runs the clang front end for a MIPS
 # target and switches to BPF only in opt/llc. A non-BPF front end ignores
@@ -52,6 +53,7 @@ CMAKE_OPTIONS += \
 define Build/Compile
 	$(call Build/Compile/Default)
 	$(call CompileBPF,$(PKG_BUILD_DIR)/bpf/obserwrt-bpf.c,-target $(BPF_TARGET))
+	$(call CompileBPF,$(PKG_BUILD_DIR)/bpf/obserwrt-drops.c,-target $(BPF_TARGET))
 endef
 
 define Package/obserwrt
@@ -83,6 +85,7 @@ define Package/obserwrt/install
 		$(1)/etc/init.d
 	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/bin/obserwrt $(1)/usr/bin/
 	$(INSTALL_DATA) $(PKG_BUILD_DIR)/bpf/obserwrt-bpf.o $(1)/lib/bpf/
+	$(INSTALL_DATA) $(PKG_BUILD_DIR)/bpf/obserwrt-drops.o $(1)/lib/bpf/
 	$(INSTALL_BIN) ./files/obserwrt.init $(1)/etc/init.d/obserwrt
 	$(INSTALL_DATA) ./files/obserwrt.conf $(1)/etc/config/obserwrt
 endef
