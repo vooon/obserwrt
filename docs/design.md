@@ -490,7 +490,10 @@ two sources, split honestly between BPF truth and userspace:
   The `accounted/seen` ratio hence shows how much non-IP/unsupported traffic the
   observation point carries (useful on WAN/Ethernet; near 1 on AWG/L3).
 - **per-device counters, BPF truth** (`obserwrt_devstats` `PERCPU_HASH` keyed
-  by ifindex + direction, entries dropped on detach):
+  by ifindex + direction, entries dropped on detach; 1024 entries, i.e. 512
+  devices, like `obserwrt_attached`. eBPF cannot report a failed insert, so
+  the agent warns at attach when the maps are at 90 % or over capacity: flows
+  are still observed, the device's class counters or drop records are not):
   `obserwrt_device_packets_total` / `obserwrt_device_bytes_total`
   `{ifname, direction, class}`, same units as above. `class` is `ipv4`, `ipv6`,
   `arp` or `other`, taken from the EtherType after up to two VLAN tags on

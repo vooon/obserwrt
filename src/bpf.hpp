@@ -61,8 +61,10 @@ class Bpf
 
 	/* TC ingress+egress attach on a device incarnation (real ifindex), with
 	 * the Ethernet or L3 program pair (see link_is_ethernet()). Idempotent;
-	 * keeps the tcx links until detach(). */
-	bool attach(uint32_t ifindex, bool ethernet, std::string *err);
+	 * keeps the tcx links until detach(). On success `*warn` (optional) is
+	 * set when the per-device maps are near or over capacity: flows are
+	 * observed, but the device's class counters or drop records are not. */
+	bool attach(uint32_t ifindex, bool ethernet, std::string *err, std::string *warn = nullptr);
 	void detach(uint32_t ifindex);
 	bool attached(uint32_t ifindex) const;
 
@@ -126,6 +128,8 @@ class Bpf
 
 	/* Delete a device's class counters (both directions). */
 	void drop_dev_counters(uint32_t ifindex) const;
+	/* Devices with both tcx links live. */
+	uint32_t live_count() const;
 };
 
 /* Read the per-CPU device class counters map (fd), summed over CPUs. False
